@@ -16,7 +16,19 @@ function SendIcon() {
   )
 }
 
-export default function PhotoCard({ photo, onToggleLike, onAddComment, onPhotoClick }) {
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6M14 11v6" />
+      <path d="M9 6V4h6v2" />
+    </svg>
+  )
+}
+
+// onDelete is only passed for admin users — non-admins never see the button
+export default function PhotoCard({ photo, onToggleLike, onAddComment, onPhotoClick, onDelete }) {
   const [comment,     setComment]     = useState('')
   const [isAnimating, setIsAnimating] = useState(false)
   const inputRef = useRef(null)
@@ -46,7 +58,7 @@ export default function PhotoCard({ photo, onToggleLike, onAddComment, onPhotoCl
     <div className="bg-cp-card border border-cp-border rounded-2xl overflow-hidden hover:border-cp-border-soft transition-colors duration-200">
       {/* Photo */}
       <div
-        className="aspect-[4/3] overflow-hidden bg-cp-elevated cursor-zoom-in"
+        className="relative aspect-[4/3] overflow-hidden bg-cp-elevated cursor-zoom-in group/photo"
         onClick={() => onPhotoClick?.()}
       >
         <img
@@ -55,6 +67,17 @@ export default function PhotoCard({ photo, onToggleLike, onAddComment, onPhotoCl
           className="w-full h-full object-cover hover:scale-[1.02] transition-transform duration-500"
           loading="lazy"
         />
+
+        {/* Admin delete button — only rendered when onDelete is provided */}
+        {onDelete && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(photo.id, photo.src) }}
+            className="absolute top-2 right-2 w-7 h-7 flex items-center justify-center rounded-lg bg-black/60 text-white/70 hover:text-red-400 hover:bg-black/85 opacity-0 group-hover/photo:opacity-100 transition-all duration-150"
+            title="Delete photo"
+          >
+            <TrashIcon />
+          </button>
+        )}
       </div>
 
       {/* Content */}

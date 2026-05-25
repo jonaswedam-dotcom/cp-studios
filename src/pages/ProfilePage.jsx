@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { useApp } from '../context/AppContext'
+import { getStoragePath } from '../lib/storage'
 import PhotoCard from '../components/PhotoCard'
 import UploadModal from '../components/UploadModal'
 import Lightbox from '../components/Lightbox'
@@ -46,7 +47,8 @@ export default function ProfilePage() {
   const [isUploadOpen,  setIsUploadOpen]  = useState(false)
   const [lightboxIndex, setLightboxIndex] = useState(null)
 
-  const profile = profiles.find(p => p.id === id)
+  const profile  = profiles.find(p => p.id === id)
+  const isAdmin  = currentUser?.isAdmin
 
   // ── Fetch all photos + likes + comments for this profile ───
   const fetchPhotos = useCallback(async () => {
@@ -130,6 +132,21 @@ export default function ProfilePage() {
     // Realtime will fire and replace temp comment with real one
   }
 
+  // ── Delete photo (admin only) ──────────────────────────────
+  const deletePhoto = async (photoId, imageUrl) => {
+    // Remove from UI immediately
+    setPhotos(prev => prev.filter(p => p.id !== photoId))
+
+    // Delete file from Storage (best-effort — ignore if path not found)
+    const path = getStoragePath(imageUrl)
+    if (path) {
+      await supabase.storage.from('cp-studios').remove([path])
+    }
+
+    // Delete DB row (cascades to likes + comments)
+    await supabase.from('photos').delete().eq('id', photoId)
+  }
+
   // ── Upload callback ────────────────────────────────────────
   const onPhotoUploaded = () => {
     setIsUploadOpen(false)
@@ -205,6 +222,7 @@ export default function ProfilePage() {
                 onToggleLike={toggleLike}
                 onAddComment={addComment}
                 onPhotoClick={() => setLightboxIndex(index)}
+                onDelete={isAdmin ? deletePhoto : undefined}
               />
             ))}
           </div>
@@ -225,6 +243,7 @@ export default function ProfilePage() {
           initialIndex={lightboxIndex}
           onToggleLike={toggleLike}
           onAddComment={addComment}
+          onDelete={isAdmin ? deletePhoto : undefined}
           onClose={() => setLightboxIndex(null)}
         />
       )}

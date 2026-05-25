@@ -35,7 +35,19 @@ function SendIcon() {
   )
 }
 
-export default function Lightbox({ photos, initialIndex, onToggleLike, onAddComment, onClose }) {
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6M14 11v6" />
+      <path d="M9 6V4h6v2" />
+    </svg>
+  )
+}
+
+// onDelete is only passed for admin users — non-admins never see the button
+export default function Lightbox({ photos, initialIndex, onToggleLike, onAddComment, onDelete, onClose }) {
   const { currentUser } = useApp()
 
   const [idx,         setIdx]         = useState(initialIndex)
@@ -45,7 +57,13 @@ export default function Lightbox({ photos, initialIndex, onToggleLike, onAddComm
   const commentsEndRef  = useRef(null)
   const commentInputRef = useRef(null)
 
-  const photo = photos[idx]
+  // Keep idx in bounds if photos array shrinks (e.g. after deletion)
+  useEffect(() => {
+    if (photos.length === 0) { onClose(); return }
+    if (idx >= photos.length) setIdx(photos.length - 1)
+  }, [photos.length, idx, onClose])
+
+  const photo = photos[idx] ?? null
 
   // Lock body scroll
   useEffect(() => {
@@ -95,6 +113,13 @@ export default function Lightbox({ photos, initialIndex, onToggleLike, onAddComm
       e.preventDefault()
       handleCommentSubmit()
     }
+  }
+
+  const handleDelete = () => {
+    if (!photo) return
+    // ProfilePage will remove the photo from the array; the useEffect above
+    // will then close the lightbox (if last photo) or clamp the index.
+    onDelete?.(photo.id, photo.src)
   }
 
   if (!photo) return null
@@ -148,12 +173,25 @@ export default function Lightbox({ photos, initialIndex, onToggleLike, onAddComm
             <span className="text-xs text-cp-muted tabular-nums">
               {idx + 1} / {photos.length}
             </span>
-            <button
-              onClick={onClose}
-              className="w-8 h-8 flex items-center justify-center rounded-xl text-cp-muted hover:text-cp-text hover:bg-cp-elevated transition-all duration-150"
-            >
-              <XIcon />
-            </button>
+
+            <div className="flex items-center gap-1">
+              {/* Admin-only delete button */}
+              {onDelete && (
+                <button
+                  onClick={handleDelete}
+                  className="w-8 h-8 flex items-center justify-center rounded-xl text-cp-muted hover:text-red-400 hover:bg-red-400/10 transition-all duration-150"
+                  title="Delete photo"
+                >
+                  <TrashIcon />
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="w-8 h-8 flex items-center justify-center rounded-xl text-cp-muted hover:text-cp-text hover:bg-cp-elevated transition-all duration-150"
+              >
+                <XIcon />
+              </button>
+            </div>
           </div>
 
           {/* Caption + like */}
