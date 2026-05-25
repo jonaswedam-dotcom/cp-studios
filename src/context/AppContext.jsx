@@ -99,9 +99,15 @@ export function AppProvider({ children }) {
     })
     if (error) throw error
 
+    // After signup the session is null (email confirmation pending or
+    // approval gate not yet passed). Read the user id directly from the
+    // auth response — never from the session, which may be null here.
+    const userId = data?.user?.id
+    if (!userId) throw new Error('Signup failed — please try again.')
+
     // Add to pending_users with status "pending"
     const { error: puError } = await supabase.from('pending_users').insert({
-      user_id:  data.user.id,
+      user_id:  userId,
       email,
       username,
     })
