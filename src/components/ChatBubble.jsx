@@ -351,7 +351,7 @@ export default function ChatBubble() {
   if (!currentUser) return null
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
+    <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3 pointer-events-none">
 
       {/* ── Popup ──────────────────────────────────────────── */}
       <div
@@ -476,6 +476,7 @@ export default function ChatBubble() {
           flex items-center justify-center
           shadow-lg shadow-black/40
           transition-all duration-200
+          pointer-events-auto
           ${chatOpen
             ? 'bg-cp-accent-hover text-cp-bg scale-95'
             : 'bg-cp-accent hover:bg-cp-accent-hover text-cp-bg hover:scale-105'
