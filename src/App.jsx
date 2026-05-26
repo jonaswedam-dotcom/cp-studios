@@ -1,12 +1,12 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AppProvider, useApp } from './context/AppContext'
 import Navbar from './components/Navbar'
+import ChatBubble from './components/ChatBubble'
 import LoginPage from './pages/LoginPage'
 import HomePage from './pages/HomePage'
 import ProfilePage from './pages/ProfilePage'
 import CreateProfilePage from './pages/CreateProfilePage'
 import AdminPage from './pages/AdminPage'
-import ChatPage from './pages/ChatPage'
 
 function WithNav({ children }) {
   return (
@@ -65,12 +65,6 @@ function AppRoutes() {
         </ProtectedRoute>
       } />
 
-      <Route path="/chat" element={
-        <ProtectedRoute>
-          <WithNav><ChatPage /></WithNav>
-        </ProtectedRoute>
-      } />
-
       <Route path="/admin" element={
         <AdminRoute>
           <WithNav><AdminPage /></WithNav>
@@ -87,6 +81,8 @@ export default function App() {
     <AppProvider>
       <div className="min-h-screen bg-cp-bg">
         <AppRoutes />
+        {/* Floating chat bubble — always mounted so state persists across navigation */}
+        <ChatBubble />
       </div>
     </AppProvider>
   )

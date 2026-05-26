@@ -23,6 +23,7 @@ export function AppProvider({ children }) {
   const [session,     setSession]     = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [profiles,    setProfiles]    = useState([])
+  const [chatOpen,    setChatOpen]    = useState(false)
 
   // ── Auth state ─────────────────────────────────────────────
   useEffect(() => {
@@ -176,6 +177,8 @@ export function AppProvider({ children }) {
         signup,
         logout,
         updateCurrentUser,
+        chatOpen,
+        setChatOpen,
       }}
     >
       {children}
