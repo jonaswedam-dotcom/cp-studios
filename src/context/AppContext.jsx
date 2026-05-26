@@ -67,9 +67,29 @@ export function AppProvider({ children }) {
     : null
 
   // ── Auth actions ───────────────────────────────────────────
+
   const login = async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) throw error
+
+    if (error) {
+      const msg = error.message?.toLowerCase() ?? ''
+
+      // Supabase returns this when the user hasn't clicked their confirmation link yet
+      if (msg.includes('email not confirmed') || error.code === 'email_not_confirmed') {
+        const e = new Error('EMAIL_NOT_CONFIRMED')
+        e.code  = 'EMAIL_NOT_CONFIRMED'
+        throw e
+      }
+
+      // Wrong credentials – don't leak which field is wrong
+      if (msg.includes('invalid login credentials') || msg.includes('invalid email or password')) {
+        const e = new Error('Incorrect email or password.')
+        e.code  = 'INVALID_CREDENTIALS'
+        throw e
+      }
+
+      throw error
+    }
 
     // Admin bypasses the pending-approval gate
     if (data.user.email !== ADMIN_EMAIL) {
@@ -81,11 +101,15 @@ export function AppProvider({ children }) {
 
       if (!pu || pu.status === 'pending') {
         await supabase.auth.signOut()
-        throw new Error('Your account is pending admin approval.')
+        const e = new Error('PENDING_APPROVAL')
+        e.code  = 'PENDING_APPROVAL'
+        throw e
       }
       if (pu.status === 'rejected') {
         await supabase.auth.signOut()
-        throw new Error('Your signup request was not approved.')
+        const e = new Error('Your signup request was not approved.')
+        e.code  = 'REJECTED'
+        throw e
       }
     }
     return data
@@ -99,11 +123,14 @@ export function AppProvider({ children }) {
     })
     if (error) throw error
 
-    // After signup the session is null (email confirmation pending or
-    // approval gate not yet passed). Read the user id directly from the
-    // auth response — never from the session, which may be null here.
+    // Read the user id directly from the auth response — the session is null
+    // when Supabase requires email confirmation, so we never rely on it here.
     const userId = data?.user?.id
     if (!userId) throw new Error('Signup failed — please try again.')
+
+    // When email confirmation is enabled, data.session is null.
+    // We use this to tell the UI which "next step" message to show.
+    const emailConfirmationRequired = !data.session
 
     // Add to pending_users with status "pending"
     const { error: puError } = await supabase.from('pending_users').insert({
@@ -111,10 +138,15 @@ export function AppProvider({ children }) {
       email,
       username,
     })
-    if (puError && !puError.message.includes('duplicate')) throw puError
+    if (puError && !puError.message?.includes('duplicate')) throw puError
 
-    // Sign out immediately – they need admin approval first
-    await supabase.auth.signOut()
+    // Only sign out when Supabase handed us an active session immediately
+    // (i.e. email confirmation is disabled). Otherwise there is nothing to sign out from.
+    if (data.session) {
+      await supabase.auth.signOut()
+    }
+
+    return { emailConfirmationRequired }
   }
 
   const logout = async () => {
