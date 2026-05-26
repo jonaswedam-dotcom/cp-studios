@@ -19,14 +19,20 @@ function XSmallIcon() {
   )
 }
 
+function formatJoinDate(ts) {
+  return new Date(ts).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
 export default function AdminPage() {
   const navigate = useNavigate()
   const { currentUser } = useApp()
 
-  const [pendingUsers, setPendingUsers] = useState([])
-  const [removingIds,  setRemovingIds]  = useState(new Set())
-  const [loading,      setLoading]      = useState(true)
-  const [error,        setError]        = useState('')
+  const [pendingUsers,  setPendingUsers]  = useState([])
+  const [approvedUsers, setApprovedUsers] = useState([])
+  const [removingIds,   setRemovingIds]   = useState(new Set())
+  const [loading,       setLoading]       = useState(true)
+  const [usersLoading,  setUsersLoading]  = useState(true)
+  const [error,         setError]         = useState('')
 
   const fetchPending = useCallback(async () => {
     setLoading(true)
@@ -44,7 +50,19 @@ export default function AdminPage() {
     setLoading(false)
   }, [])
 
+  const fetchApproved = useCallback(async () => {
+    setUsersLoading(true)
+    const { data } = await supabase
+      .from('pending_users')
+      .select('*')
+      .eq('status', 'approved')
+      .order('created_at', { ascending: false })
+    setApprovedUsers(data || [])
+    setUsersLoading(false)
+  }, [])
+
   useEffect(() => { fetchPending() }, [fetchPending])
+  useEffect(() => { fetchApproved() }, [fetchApproved])
 
   const handleAction = async (user, action) => {
     const newStatus = action === 'approve' ? 'approved' : 'rejected'
@@ -66,6 +84,9 @@ export default function AdminPage() {
 
       setPendingUsers(prev => prev.filter(u => u.id !== user.id))
       setRemovingIds(prev => { const s = new Set(prev); s.delete(user.id); return s })
+
+      // Refresh the All Users list if someone was just approved
+      if (action === 'approve') fetchApproved()
     }, 320)
   }
 
@@ -155,6 +176,62 @@ export default function AdminPage() {
           Approved members will receive access. Rejected requests are removed.
         </p>
       )}
+
+      {/* ── All Users ──────────────────────────────────────────── */}
+      <div className="mt-16">
+        {/* Section heading */}
+        <div className="flex items-center gap-3 mb-6">
+          <h2 className="font-display text-xl text-cp-text font-normal">All Users</h2>
+          {!usersLoading && (
+            <span className="text-xs text-cp-muted bg-cp-elevated px-2.5 py-1 rounded-full border border-cp-border">
+              {approvedUsers.length}
+            </span>
+          )}
+        </div>
+
+        {usersLoading ? (
+          <div className="flex items-center justify-center py-16">
+            <div className="w-5 h-5 border-2 border-cp-accent border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : approvedUsers.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 gap-3 border border-dashed border-cp-border rounded-3xl">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-7 h-7 text-cp-muted/40">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+            <p className="text-cp-muted text-sm">No approved users yet.</p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {approvedUsers.map((user) => (
+              <div
+                key={user.id}
+                className="bg-cp-card border border-cp-border rounded-2xl px-4 py-3.5 flex items-center gap-4 hover:border-cp-border-soft transition-colors duration-150"
+              >
+                {/* Avatar initial */}
+                <div className="w-9 h-9 rounded-full bg-cp-elevated border border-cp-border flex items-center justify-center flex-shrink-0">
+                  <span className="font-display text-cp-muted text-sm">
+                    {(user.username || user.email || '?')[0].toUpperCase()}
+                  </span>
+                </div>
+
+                {/* Name + email */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-cp-text text-sm font-medium truncate">{user.username || '—'}</p>
+                  <p className="text-cp-muted text-xs truncate">{user.email}</p>
+                </div>
+
+                {/* Join date */}
+                <div className="flex-shrink-0 text-right">
+                  <p className="text-cp-muted/60 text-xs">{formatJoinDate(user.created_at)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
