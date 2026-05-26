@@ -6,6 +6,7 @@ import HomePage from './pages/HomePage'
 import ProfilePage from './pages/ProfilePage'
 import CreateProfilePage from './pages/CreateProfilePage'
 import AdminPage from './pages/AdminPage'
+import ChatPage from './pages/ChatPage'
 
 function WithNav({ children }) {
   return (
@@ -61,6 +62,12 @@ function AppRoutes() {
       <Route path="/create" element={
         <ProtectedRoute>
           <WithNav><CreateProfilePage /></WithNav>
+        </ProtectedRoute>
+      } />
+
+      <Route path="/chat" element={
+        <ProtectedRoute>
+          <WithNav><ChatPage /></WithNav>
         </ProtectedRoute>
       } />
 

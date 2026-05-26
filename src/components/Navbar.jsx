@@ -4,6 +4,7 @@ import { supabase } from '../supabase'
 import { useApp } from '../context/AppContext'
 
 const ADMIN_VISIT_KEY = 'cp-studios:admin-last-visit'
+const chatVisitKey   = (uid) => `cp-studios:chat-last-visit:${uid}`
 
 function CameraIcon() {
   return (
@@ -27,7 +28,8 @@ function LogOutIcon() {
 export default function Navbar() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { currentUser, logout, updateCurrentUser } = useApp()
+  const { currentUser, logout, updateCurrentUser, session } = useApp()
+  const userId = session?.user?.id
 
   const [isOpen,          setIsOpen]          = useState(false)
   const [draftName,       setDraftName]       = useState('')
@@ -36,6 +38,7 @@ export default function Navbar() {
   const [saved,           setSaved]           = useState(false)
   const [saving,          setSaving]          = useState(false)
   const [hasNewRequests,  setHasNewRequests]  = useState(false)
+  const [hasChatDot,      setHasChatDot]      = useState(false)
 
   const panelRef   = useRef(null)
   const triggerRef = useRef(null)
@@ -99,6 +102,40 @@ export default function Navbar() {
     setHasNewRequests(false)
   }, [location.pathname, currentUser?.isAdmin])
 
+  // ── Chat notification dot ─────────────────────────────────
+  const checkChatMessages = useCallback(async () => {
+    if (!userId) return
+    const lastVisit = localStorage.getItem(chatVisitKey(userId)) || new Date(0).toISOString()
+    const { count } = await supabase
+      .from('messages')
+      .select('*', { count: 'exact', head: true })
+      .neq('user_id', userId)
+      .gt('created_at', lastVisit)
+    setHasChatDot((count ?? 0) > 0)
+  }, [userId])
+
+  useEffect(() => {
+    checkChatMessages()
+    if (!userId) return
+
+    const channel = supabase
+      .channel('navbar-chat')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' },
+        (payload) => {
+          if (payload.new.user_id !== userId) checkChatMessages()
+        })
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
+  }, [userId, checkChatMessages])
+
+  // Clear chat dot when user is on /chat
+  useEffect(() => {
+    if (location.pathname !== '/chat' || !userId) return
+    localStorage.setItem(chatVisitKey(userId), new Date().toISOString())
+    setHasChatDot(false)
+  }, [location.pathname, userId])
+
   const handleAvatarFile = (e) => {
     const file = e.target.files[0]
     if (file) {
@@ -160,8 +197,9 @@ export default function Navbar() {
         <div className="flex items-center gap-7">
           <nav className="flex items-center gap-6">
             {[
-              { to: '/',       label: 'Home'   },
-              { to: '/create', label: 'Upload' },
+              { to: '/',       label: 'Home'                              },
+              { to: '/chat',   label: 'Chat',   badge: hasChatDot        },
+              { to: '/create', label: 'Upload'                            },
               ...(currentUser.isAdmin
                 ? [{ to: '/admin', label: 'Admin', badge: hasNewRequests }]
                 : []),
@@ -176,12 +214,11 @@ export default function Navbar() {
                   }`
                 }
               >
-                {/* badge is only set for the Admin link */}
                 {badge !== undefined ? (
                   <span className="relative inline-flex">
-                    Admin
+                    {label}
                     {badge && (
-                      <span className="absolute -top-1 -right-2.5 w-2 h-2 rounded-full bg-red-500 ring-2 ring-cp-bg" />
+                      <span className="absolute -top-1 -right-2.5 w-2 h-2 rounded-full bg-cp-accent ring-2 ring-cp-bg" />
                     )}
                   </span>
                 ) : label}
