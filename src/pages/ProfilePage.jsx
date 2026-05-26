@@ -82,6 +82,13 @@ export default function ProfilePage() {
     fetchPhotos()
   }, [fetchPhotos])
 
+  // ── Mark profile as visited (clears unread dot on HomePage) ─
+  useEffect(() => {
+    if (!id || !session?.user?.id) return
+    const key = `cp-studios:visited:${session.user.id}:${id}`
+    localStorage.setItem(key, new Date().toISOString())
+  }, [id, session?.user?.id])
+
   // ── Realtime subscriptions for likes & comments ────────────
   useEffect(() => {
     if (!id) return

@@ -1,7 +1,9 @@
-import { useState, useRef, useEffect } from 'react'
-import { Link, NavLink, useNavigate } from 'react-router-dom'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { Link, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { useApp } from '../context/AppContext'
+
+const ADMIN_VISIT_KEY = 'cp-studios:admin-last-visit'
 
 function CameraIcon() {
   return (
@@ -24,14 +26,16 @@ function LogOutIcon() {
 
 export default function Navbar() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { currentUser, logout, updateCurrentUser } = useApp()
 
-  const [isOpen,      setIsOpen]      = useState(false)
-  const [draftName,   setDraftName]   = useState('')
-  const [draftAvatar, setDraftAvatar] = useState('')
-  const [avatarFile,  setAvatarFile]  = useState(null)
-  const [saved,       setSaved]       = useState(false)
-  const [saving,      setSaving]      = useState(false)
+  const [isOpen,          setIsOpen]          = useState(false)
+  const [draftName,       setDraftName]       = useState('')
+  const [draftAvatar,     setDraftAvatar]     = useState('')
+  const [avatarFile,      setAvatarFile]      = useState(null)
+  const [saved,           setSaved]           = useState(false)
+  const [saving,          setSaving]          = useState(false)
+  const [hasNewRequests,  setHasNewRequests]  = useState(false)
 
   const panelRef   = useRef(null)
   const triggerRef = useRef(null)
@@ -59,6 +63,41 @@ export default function Navbar() {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [isOpen])
+
+  // ── Admin notification dot ────────────────────────────────
+  const checkPendingRequests = useCallback(async () => {
+    if (!currentUser?.isAdmin) return
+    // Only count requests that arrived after the admin's last visit to /admin
+    const lastVisit = localStorage.getItem(ADMIN_VISIT_KEY) || new Date(0).toISOString()
+    const { count } = await supabase
+      .from('pending_users')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'pending')
+      .gt('created_at', lastVisit)
+    setHasNewRequests((count ?? 0) > 0)
+  }, [currentUser?.isAdmin])
+
+  // Initial fetch + realtime subscription
+  useEffect(() => {
+    checkPendingRequests()
+    if (!currentUser?.isAdmin) return
+
+    const channel = supabase
+      .channel('navbar-pending')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'pending_users' },
+        () => checkPendingRequests())
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
+  }, [currentUser?.isAdmin, checkPendingRequests])
+
+  // Clear dot when admin lands on /admin; stamp localStorage so only newer
+  // requests will trigger the dot again
+  useEffect(() => {
+    if (location.pathname !== '/admin' || !currentUser?.isAdmin) return
+    localStorage.setItem(ADMIN_VISIT_KEY, new Date().toISOString())
+    setHasNewRequests(false)
+  }, [location.pathname, currentUser?.isAdmin])
 
   const handleAvatarFile = (e) => {
     const file = e.target.files[0]
@@ -123,8 +162,10 @@ export default function Navbar() {
             {[
               { to: '/',       label: 'Home'   },
               { to: '/create', label: 'Upload' },
-              ...(currentUser.isAdmin ? [{ to: '/admin', label: 'Admin' }] : []),
-            ].map(({ to, label }) => (
+              ...(currentUser.isAdmin
+                ? [{ to: '/admin', label: 'Admin', badge: hasNewRequests }]
+                : []),
+            ].map(({ to, label, badge }) => (
               <NavLink
                 key={to}
                 to={to}
@@ -135,7 +176,15 @@ export default function Navbar() {
                   }`
                 }
               >
-                {label}
+                {/* badge is only set for the Admin link */}
+                {badge !== undefined ? (
+                  <span className="relative inline-flex">
+                    Admin
+                    {badge && (
+                      <span className="absolute -top-1 -right-2.5 w-2 h-2 rounded-full bg-red-500 ring-2 ring-cp-bg" />
+                    )}
+                  </span>
+                ) : label}
               </NavLink>
             ))}
           </nav>

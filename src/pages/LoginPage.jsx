@@ -120,58 +120,35 @@ export default function LoginPage() {
     setSignupDone(null)
   }
 
-  // ── Signup success screens ─────────────────────────────────
-  const SignupSuccessWithEmailConfirm = () => (
-    <div className="py-4 text-center space-y-4 page-in">
-      <div className="w-12 h-12 rounded-2xl bg-cp-elevated border border-cp-border flex items-center justify-center mx-auto">
-        {/* Envelope icon */}
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 text-cp-accent">
-          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-          <polyline points="22,6 12,13 2,6" />
+  // ── Signup success screen ─────────────────────────────────
+  const SignupSuccess = () => (
+    <div className="py-2 text-center space-y-6 page-in">
+      {/* Icon */}
+      <div className="w-14 h-14 rounded-full bg-cp-accent/10 border border-cp-accent/20 flex items-center justify-center mx-auto">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 text-cp-accent">
+          <polyline points="20 6 9 17 4 12" />
         </svg>
       </div>
-      <div>
-        <p className="text-cp-text text-sm font-medium">Check your email</p>
-        <p className="text-cp-muted text-xs mt-2 leading-relaxed max-w-[220px] mx-auto">
-          We sent a confirmation link to{' '}
-          <span className="text-cp-text">{signupEmail}</span>.
-          <br /><br />
-          <strong className="text-cp-text/80">Step 1 —</strong> Click that link to verify your address.
-          <br />
-          <strong className="text-cp-text/80">Step 2 —</strong> Come back and sign in once an admin approves your account.
-        </p>
-      </div>
-      <button
-        onClick={() => switchTab('login')}
-        className="text-xs text-cp-accent hover:underline"
-      >
-        Back to sign in
-      </button>
-    </div>
-  )
 
-  const SignupSuccessNoEmailConfirm = () => (
-    <div className="py-4 text-center space-y-3 page-in">
-      <div className="w-12 h-12 rounded-2xl bg-cp-elevated border border-cp-border flex items-center justify-center mx-auto">
-        {/* Clock icon */}
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 text-cp-accent">
-          <circle cx="12" cy="12" r="10" />
-          <polyline points="12 6 12 12 16 14" />
-        </svg>
-      </div>
-      <div>
-        <p className="text-cp-text text-sm font-medium">Request received</p>
-        <p className="text-cp-muted text-xs mt-1 leading-relaxed">
-          Your account is pending admin approval.
-          <br />
-          You'll be able to sign in once approved.
+      {/* Copy */}
+      <div className="space-y-2">
+        <h3 className="font-display text-xl text-cp-text font-normal">Request sent!</h3>
+        <p className="text-cp-muted text-sm leading-relaxed max-w-[230px] mx-auto">
+          Your account request has been received. Once the admin approves your account you will be able to sign in. This may take a little while.
         </p>
+        {emailConfirmationRequired && (
+          <p className="text-cp-muted/60 text-xs leading-relaxed max-w-[230px] mx-auto pt-1">
+            You'll also need to confirm your email — check your inbox for a link from us before signing in.
+          </p>
+        )}
       </div>
+
+      {/* CTA */}
       <button
         onClick={() => switchTab('login')}
-        className="text-xs text-cp-accent hover:underline"
+        className="w-full py-3 rounded-xl bg-cp-accent hover:bg-cp-accent-hover text-cp-bg text-sm font-medium transition-colors duration-150"
       >
-        Back to sign in
+        Back to Sign In
       </button>
     </div>
   )
@@ -267,11 +244,7 @@ export default function LoginPage() {
           )}
 
           {/* ── Signup success ── */}
-          {tab === 'signup' && signupDone === true && (
-            emailConfirmationRequired
-              ? <SignupSuccessWithEmailConfirm />
-              : <SignupSuccessNoEmailConfirm />
-          )}
+          {tab === 'signup' && signupDone === true && <SignupSuccess />}
         </div>
 
         <p className="text-center text-xs text-cp-muted/50 mt-8">

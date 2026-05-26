@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { useApp } from '../context/AppContext'
@@ -52,27 +52,34 @@ function ConfirmModal({ profileName, onConfirm, onCancel, loading }) {
   )
 }
 
-// ProfileCard renders differently based on whether the admin is viewing
-function ProfileCard({ profile, isAdmin, onDeleteClick }) {
+function ProfileCard({ profile, isAdmin, hasUnread, onDeleteClick }) {
   return (
     <div className="relative group">
       <Link
         to={`/profile/${profile.id}`}
         className="flex flex-col items-center gap-3 p-6 rounded-2xl border border-cp-border hover:border-cp-border-soft hover:bg-cp-card transition-all duration-200"
       >
-        <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-cp-border group-hover:border-cp-accent/40 transition-colors duration-200">
-          <img
-            src={profile.avatar}
-            alt={profile.name}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-          />
+        {/* Avatar with unread dot */}
+        <div className="relative">
+          <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-cp-border group-hover:border-cp-accent/40 transition-colors duration-200">
+            <img
+              src={profile.avatar}
+              alt={profile.name}
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            />
+          </div>
+          {/* Unread indicator — bottom-right of avatar so it never conflicts with delete btn */}
+          {hasUnread && (
+            <span className="absolute bottom-0.5 right-0.5 w-3 h-3 rounded-full bg-cp-accent ring-2 ring-cp-bg" />
+          )}
         </div>
+
         <span className="font-display text-cp-text text-sm font-medium text-center leading-tight">
           {profile.name}
         </span>
       </Link>
 
-      {/* Admin-only delete button — appears on hover */}
+      {/* Admin-only delete button — top-right of card, appears on hover */}
       {isAdmin && (
         <button
           onClick={(e) => { e.preventDefault(); onDeleteClick(profile) }}
@@ -87,51 +94,76 @@ function ProfileCard({ profile, isAdmin, onDeleteClick }) {
 }
 
 export default function HomePage() {
-  const { profiles, currentUser, loadProfiles } = useApp()
+  const { profiles, currentUser, session, loadProfiles } = useApp()
 
-  const [confirmTarget, setConfirmTarget] = useState(null)   // profile pending confirmation
-  const [deleting,      setDeleting]      = useState(false)
-  const [removingIds,   setRemovingIds]   = useState(new Set())
+  const [confirmTarget,   setConfirmTarget]   = useState(null)
+  const [deleting,        setDeleting]        = useState(false)
+  const [removingIds,     setRemovingIds]     = useState(new Set())
+  // profileId -> latest photo timestamp (ms)
+  const [latestByProfile, setLatestByProfile] = useState({})
 
-  const isAdmin = currentUser?.isAdmin
+  const isAdmin  = currentUser?.isAdmin
+  const userId   = session?.user?.id
 
+  // ── Fetch latest photo timestamp per profile ───────────────
+  const fetchLatestPhotos = useCallback(async () => {
+    const { data } = await supabase
+      .from('photos')
+      .select('profile_id, created_at')
+
+    if (!data) return
+
+    const map = {}
+    data.forEach(p => {
+      const t = new Date(p.created_at).getTime()
+      if (!map[p.profile_id] || t > map[p.profile_id]) {
+        map[p.profile_id] = t
+      }
+    })
+    setLatestByProfile(map)
+  }, [])
+
+  useEffect(() => {
+    if (!session) return
+    fetchLatestPhotos()
+  }, [session, fetchLatestPhotos])
+
+  // ── Unread check ───────────────────────────────────────────
+  const isUnread = (profileId) => {
+    if (!userId) return false
+    const latest = latestByProfile[profileId]
+    if (!latest) return false
+    const key       = `cp-studios:visited:${userId}:${profileId}`
+    const lastVisit = localStorage.getItem(key)
+    const lastMs    = lastVisit ? new Date(lastVisit).getTime() : 0
+    return latest > lastMs
+  }
+
+  // ── Admin delete profile ───────────────────────────────────
   const handleDeleteConfirmed = async () => {
     if (!confirmTarget) return
     setDeleting(true)
 
     try {
-      // 1. Fetch all photo URLs for storage cleanup
       const { data: photos } = await supabase
         .from('photos')
         .select('image_url')
         .eq('profile_id', confirmTarget.id)
 
-      // 2. Remove photo files from Storage
       if (photos?.length > 0) {
         const paths = photos.map(p => getStoragePath(p.image_url)).filter(Boolean)
-        if (paths.length > 0) {
-          await supabase.storage.from('cp-studios').remove(paths)
-        }
+        if (paths.length > 0) await supabase.storage.from('cp-studios').remove(paths)
       }
 
-      // 3. Remove avatar from Storage if it lives in our bucket
       const avatarPath = getStoragePath(confirmTarget.avatar)
-      if (avatarPath) {
-        await supabase.storage.from('cp-studios').remove([avatarPath])
-      }
+      if (avatarPath) await supabase.storage.from('cp-studios').remove([avatarPath])
 
-      // 4. Delete profile row — cascades to photos, likes, comments
       await supabase.from('profiles').delete().eq('id', confirmTarget.id)
 
-      // 5. Animate the card out, then refresh the list
       setRemovingIds(prev => new Set([...prev, confirmTarget.id]))
       setTimeout(() => {
         loadProfiles()
-        setRemovingIds(prev => {
-          const next = new Set(prev)
-          next.delete(confirmTarget.id)
-          return next
-        })
+        setRemovingIds(prev => { const s = new Set(prev); s.delete(confirmTarget.id); return s })
       }, 320)
     } catch (err) {
       console.error('Delete profile failed:', err)
@@ -163,6 +195,7 @@ export default function HomePage() {
               <ProfileCard
                 profile={profile}
                 isAdmin={isAdmin}
+                hasUnread={isUnread(profile.id)}
                 onDeleteClick={setConfirmTarget}
               />
             </div>
