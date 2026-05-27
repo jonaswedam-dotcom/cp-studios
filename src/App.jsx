@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AppProvider, useApp } from './context/AppContext'
+import { CasinoProvider } from './context/CasinoContext'
 import Navbar from './components/Navbar'
 import ChatBubble from './components/ChatBubble'
 import LoginPage from './pages/LoginPage'
@@ -7,6 +8,15 @@ import HomePage from './pages/HomePage'
 import ProfilePage from './pages/ProfilePage'
 import CreateProfilePage from './pages/CreateProfilePage'
 import AdminPage from './pages/AdminPage'
+import CasinoPage from './pages/CasinoPage'
+import CoinFlipGame from './pages/casino/CoinFlipGame'
+import DiceGame from './pages/casino/DiceGame'
+import RouletteGame from './pages/casino/RouletteGame'
+import BlackjackGame from './pages/casino/BlackjackGame'
+import SlotsGame from './pages/casino/SlotsGame'
+import AviatorGame from './pages/casino/AviatorGame'
+import ChickenRoadGame from './pages/casino/ChickenRoadGame'
+import MinesGame from './pages/casino/MinesGame'
 
 function WithNav({ children }) {
   return (
@@ -65,6 +75,53 @@ function AppRoutes() {
         </ProtectedRoute>
       } />
 
+      {/* ── Casino ── */}
+      <Route path="/casino" element={
+        <ProtectedRoute>
+          <WithNav><CasinoPage /></WithNav>
+        </ProtectedRoute>
+      } />
+      <Route path="/casino/coin-flip" element={
+        <ProtectedRoute>
+          <WithNav><CoinFlipGame /></WithNav>
+        </ProtectedRoute>
+      } />
+      <Route path="/casino/dice" element={
+        <ProtectedRoute>
+          <WithNav><DiceGame /></WithNav>
+        </ProtectedRoute>
+      } />
+      <Route path="/casino/roulette" element={
+        <ProtectedRoute>
+          <WithNav><RouletteGame /></WithNav>
+        </ProtectedRoute>
+      } />
+      <Route path="/casino/blackjack" element={
+        <ProtectedRoute>
+          <WithNav><BlackjackGame /></WithNav>
+        </ProtectedRoute>
+      } />
+      <Route path="/casino/slots" element={
+        <ProtectedRoute>
+          <WithNav><SlotsGame /></WithNav>
+        </ProtectedRoute>
+      } />
+      <Route path="/casino/aviator" element={
+        <ProtectedRoute>
+          <WithNav><AviatorGame /></WithNav>
+        </ProtectedRoute>
+      } />
+      <Route path="/casino/chicken-road" element={
+        <ProtectedRoute>
+          <WithNav><ChickenRoadGame /></WithNav>
+        </ProtectedRoute>
+      } />
+      <Route path="/casino/mines" element={
+        <ProtectedRoute>
+          <WithNav><MinesGame /></WithNav>
+        </ProtectedRoute>
+      } />
+
       <Route path="/admin" element={
         <AdminRoute>
           <WithNav><AdminPage /></WithNav>
@@ -79,11 +136,13 @@ function AppRoutes() {
 export default function App() {
   return (
     <AppProvider>
-      <div className="min-h-screen bg-cp-bg">
-        <AppRoutes />
-        {/* Floating chat bubble — always mounted so state persists across navigation */}
-        <ChatBubble />
-      </div>
+      <CasinoProvider>
+        <div className="min-h-screen bg-cp-bg">
+          <AppRoutes />
+          {/* Floating chat bubble — always mounted so state persists across navigation */}
+          <ChatBubble />
+        </div>
+      </CasinoProvider>
     </AppProvider>
   )
 }

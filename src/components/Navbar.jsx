@@ -35,6 +35,18 @@ function LogOutIcon() {
   )
 }
 
+function DiceIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+      <rect x="2" y="2" width="20" height="20" rx="3" ry="3"/>
+      <circle cx="8"  cy="8"  r="1.2" fill="currentColor" stroke="none"/>
+      <circle cx="16" cy="8"  r="1.2" fill="currentColor" stroke="none"/>
+      <circle cx="8"  cy="16" r="1.2" fill="currentColor" stroke="none"/>
+      <circle cx="16" cy="16" r="1.2" fill="currentColor" stroke="none"/>
+    </svg>
+  )
+}
+
 function CheckSmallIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
@@ -276,19 +288,22 @@ export default function Navbar() {
         <div className="flex items-center gap-7">
           <nav className="flex items-center gap-6">
             {[
-              { to: '/',       label: 'Home'                              },
-              { to: '/create', label: 'Upload'                            },
+              { to: '/',        label: 'Home',   icon: null                          },
+              { to: '/create',  label: 'Upload', icon: null                          },
+              { to: '/casino',  label: 'Casino', icon: <DiceIcon />                  },
               ...(currentUser.isAdmin
-                ? [{ to: '/admin', label: 'Admin', badge: hasNewRequests }]
+                ? [{ to: '/admin', label: 'Admin', badge: hasNewRequests, icon: null }]
                 : []),
-            ].map(({ to, label, badge }) => (
+            ].map(({ to, label, badge, icon }) => (
               <NavLink
                 key={to}
                 to={to}
                 end={to === '/'}
                 className={({ isActive }) =>
-                  `text-sm font-medium transition-colors duration-150 ${
-                    isActive ? 'text-cp-text' : 'text-cp-muted hover:text-cp-text'
+                  `text-sm font-medium transition-colors duration-150 flex items-center gap-1.5 ${
+                    isActive
+                      ? to === '/casino' ? 'text-amber-400' : 'text-cp-text'
+                      : to === '/casino' ? 'text-amber-400/60 hover:text-amber-400' : 'text-cp-muted hover:text-cp-text'
                   }`
                 }
               >
@@ -299,7 +314,12 @@ export default function Navbar() {
                       <span className="absolute -top-1 -right-2.5 w-2 h-2 rounded-full bg-cp-accent ring-2 ring-cp-bg" />
                     )}
                   </span>
-                ) : label}
+                ) : (
+                  <>
+                    {icon}
+                    {label}
+                  </>
+                )}
               </NavLink>
             ))}
           </nav>
