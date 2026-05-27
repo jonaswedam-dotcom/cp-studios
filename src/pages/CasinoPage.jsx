@@ -203,29 +203,58 @@ function LeaderboardSection() {
   const fetchLeaderboard = useCallback(async () => {
     setLbLoading(true)
 
-    const [walletsRes, profilesRes] = await Promise.all([
+    const [walletsRes, profilesRes, pendingRes] = await Promise.all([
       supabase
         .from('wallets')
         .select('user_id, balance')
         .order('balance', { ascending: false })
         .limit(10),
+      // Primary name source: profiles.full_name
+      // Requires the "anyone authenticated can read all profiles" RLS policy
+      // from migration 009 to be applied in Supabase.
       supabase
         .from('profiles')
         .select('user_id, full_name'),
+      // Secondary name source: pending_users.username / email prefix
+      // Non-admins can only read their own row, so this only helps as a
+      // self-fallback for non-admins, but the admin can see everyone here.
+      supabase
+        .from('pending_users')
+        .select('user_id, username, email'),
     ])
+
+    // Surface query errors to console to aid debugging
+    if (walletsRes.error)  console.error('[Leaderboard] wallets error:',  walletsRes.error)
+    if (profilesRes.error) console.error('[Leaderboard] profiles error:', profilesRes.error)
+    if (pendingRes.error)  console.error('[Leaderboard] pending error:',  pendingRes.error)
 
     const wallets  = walletsRes.data  ?? []
     const profiles = profilesRes.data ?? []
+    const pending  = pendingRes.data  ?? []
 
+    // Primary lookup: user_id → full_name (null-guard: user_id can be null in profiles)
     const nameMap = {}
-    for (const p of profiles) nameMap[p.user_id] = p.full_name
+    for (const p of profiles) {
+      if (p.user_id) nameMap[p.user_id] = p.full_name
+    }
+
+    // Secondary lookup: user_id → username or email-prefix from pending_users
+    const fallbackMap = {}
+    for (const u of pending) {
+      if (u.user_id) {
+        fallbackMap[u.user_id] =
+          u.username || u.email?.split('@')[0] || null
+      }
+    }
 
     setEntries(wallets.map(w => ({
       user_id:     w.user_id,
       balance:     w.balance,
-      displayName: nameMap[w.user_id]
-        ?? (w.user_id === currentUser?.id ? currentUser?.name : null)
-        ?? 'Player',
+      displayName:
+        nameMap[w.user_id]                                              // profiles.full_name  (best)
+        ?? fallbackMap[w.user_id]                                       // pending_users name  (ok)
+        ?? (w.user_id === currentUser?.id ? currentUser?.name : null)   // own name fallback
+        ?? 'Player',                                                    // last resort
     })))
     setLbLoading(false)
   }, [currentUser?.id, currentUser?.name])
