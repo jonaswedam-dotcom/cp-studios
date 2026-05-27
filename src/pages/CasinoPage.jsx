@@ -62,41 +62,19 @@ const GAMES = [
   },
 ]
 
-// ── Helper: resolve display names for wallet entries ──────────────────────────
-async function resolveNames(currentUserId, currentUserName) {
-  const [walletsRes, profilesRes, pendingRes] = await Promise.all([
-    supabase
-      .from('wallets')
-      .select('user_id, balance')
-      .order('balance', { ascending: false })
-      .limit(20),
-    supabase.from('profiles').select('user_id, full_name'),
-    supabase.from('pending_users').select('user_id, username, email'),
-  ])
-
-  const wallets  = walletsRes.data  ?? []
-  const profiles = profilesRes.data ?? []
-  const pending  = pendingRes.data  ?? []
-
-  const nameMap = {}
-  for (const p of profiles) {
-    if (p.user_id) nameMap[p.user_id] = p.full_name
+// ── Helper: fetch wallet holders joined with their profile names ──────────────
+// Uses a SECURITY DEFINER RPC (get_wallet_players) so the profiles JOIN happens
+// inside Postgres, bypassing any RLS conflicts that blocked client-side queries.
+async function resolveNames() {
+  const { data, error } = await supabase.rpc('get_wallet_players')
+  if (error) {
+    console.error('get_wallet_players RPC error:', error)
+    return []
   }
-  const fallbackMap = {}
-  for (const u of pending) {
-    if (u.user_id) {
-      fallbackMap[u.user_id] = u.username || u.email?.split('@')[0] || null
-    }
-  }
-
-  return wallets.map(w => ({
-    user_id:     w.user_id,
-    balance:     w.balance,
-    displayName:
-      nameMap[w.user_id]
-      ?? fallbackMap[w.user_id]
-      ?? (w.user_id === currentUserId ? currentUserName : null)
-      ?? 'Player',
+  return (data ?? []).map(row => ({
+    user_id:     row.user_id,
+    balance:     row.balance,
+    displayName: row.full_name,
   }))
 }
 
@@ -115,13 +93,13 @@ function SendCoinsModal({ senderBalance, onClose, onDonate }) {
 
   // Load all players once on open
   useEffect(() => {
-    resolveNames(currentUser?.id, currentUser?.name).then(all => {
+    resolveNames().then(all => {
       // Exclude self
       setPlayers(all.filter(p => p.user_id !== currentUser?.id))
       setLoading(false)
       setTimeout(() => searchRef.current?.focus(), 30)
     })
-  }, [currentUser?.id, currentUser?.name])
+  }, [currentUser?.id])
 
   // Close on Escape
   useEffect(() => {
@@ -320,10 +298,10 @@ function LeaderboardSection({ onRefresh }) {
 
   const fetchLeaderboard = useCallback(async () => {
     setLbLoading(true)
-    const data = await resolveNames(currentUser?.id, currentUser?.name)
+    const data = await resolveNames()
     setEntries(data.slice(0, 10))
     setLbLoading(false)
-  }, [currentUser?.id, currentUser?.name])
+  }, [])
 
   useEffect(() => { fetchLeaderboard() }, [fetchLeaderboard])
 
