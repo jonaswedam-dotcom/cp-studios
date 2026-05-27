@@ -74,11 +74,13 @@ export default function CreateProfilePage() {
         avatar_url = publicUrl
       }
 
-      // Insert profile row
+      // Insert profile row — link to the logged-in user's auth account so that:
+      //   • the "owner can update profile" RLS policy (auth.uid() = user_id) works
+      //   • the comments_with_author view can resolve their name from their profile
       const { data, error: insertErr } = await supabase
         .from('profiles')
         .insert({
-          user_id:    null,           // not tied to a specific auth account
+          user_id:    session?.user?.id ?? null,
           full_name:  name.trim(),
           bio:        bio.trim(),
           avatar_url: avatar_url || `https://i.pravatar.cc/150?img=${Math.floor(Math.random() * 68) + 1}`,

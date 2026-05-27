@@ -35,13 +35,28 @@ export function CasinoProvider({ children }) {
     }
 
     if (data) {
-      // Opportunistically backfill display_name for wallets created before migration 012
+      // Opportunistically backfill display_name for wallets that still have none.
+      // pending_users.username is the most reliable source (written at sign-up).
+      // Auth metadata (user_metadata.full_name) is a secondary fallback because
+      // it was null for many accounts created before that field was set.
       if (!data.display_name) {
-        const name = session?.user?.user_metadata?.full_name
-        if (name) {
-          supabase.from('wallets').update({ display_name: name }).eq('user_id', userId)
-            .then(({ error: e }) => { if (e) console.error('[CasinoContext] display_name backfill error:', e) })
-        }
+        ;(async () => {
+          const { data: pu } = await supabase
+            .from('pending_users')
+            .select('username')
+            .eq('user_id', userId)
+            .maybeSingle()
+          const name =
+            (pu?.username && pu.username.trim() !== '' ? pu.username.trim() : null) ??
+            (session?.user?.user_metadata?.full_name?.trim() || null)
+          if (name) {
+            const { error: e } = await supabase
+              .from('wallets')
+              .update({ display_name: name })
+              .eq('user_id', userId)
+            if (e) console.error('[CasinoContext] display_name backfill error:', e)
+          }
+        })()
       }
 
       let newBalance = data.balance
@@ -73,9 +88,19 @@ export function CasinoProvider({ children }) {
       setBalance(newBalance)
     } else {
       // First visit — create wallet with 1000 starting coins + first daily bonus.
-      // Store the user's display name so the leaderboard never needs a profiles join.
-      const startBalance  = 1000 + DAILY_BONUS_AMOUNT
-      const displayName   = session?.user?.user_metadata?.full_name || null
+      // Resolve display_name: prefer pending_users.username (set at sign-up,
+      // always present) then fall back to auth user metadata.
+      const startBalance = 1000 + DAILY_BONUS_AMOUNT
+
+      const { data: puRow } = await supabase
+        .from('pending_users')
+        .select('username')
+        .eq('user_id', userId)
+        .maybeSingle()
+      const displayName =
+        (puRow?.username && puRow.username.trim() !== '' ? puRow.username.trim() : null) ??
+        (session?.user?.user_metadata?.full_name?.trim() || null)
+
       const { data: created, error: insertError } = await supabase
         .from('wallets')
         .insert({
