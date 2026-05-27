@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useCasino } from '../../context/CasinoContext'
 
@@ -79,31 +80,77 @@ export function GameLayout({ title, children }) {
 }
 
 // ── BetChips ──────────────────────────────────────────────────────────────────
-const PRESET_AMOUNTS = [10, 25, 50, 100, 250]
+const PRESET_AMOUNTS = [10, 50, 100, 500]
 
 export function BetChips({ bet, onBet, balance, disabled }) {
-  const validPresets = PRESET_AMOUNTS.filter((p) => p <= balance)
+  const [raw, setRaw] = useState(String(bet))
 
-  function handleCustom(e) {
-    const raw = parseInt(e.target.value, 10)
-    if (isNaN(raw)) return
-    const clamped = Math.min(Math.max(1, raw), balance)
-    onBet(clamped)
+  // Keep raw input in sync when bet changes from outside (preset click, game reset)
+  useEffect(() => { setRaw(String(bet)) }, [bet])
+
+  const validPresets = PRESET_AMOUNTS.filter(p => p <= balance)
+  const half = Math.max(1, Math.floor(balance / 2))
+
+  function handleChange(e) {
+    const str = e.target.value
+    setRaw(str)
+    const n = Math.floor(Number(str))
+    if (Number.isInteger(n) && n >= 1) {
+      onBet(Math.min(n, balance))
+    }
+  }
+
+  function handleBlur() {
+    // Snap display to the currently active (valid) bet value
+    setRaw(String(bet))
+  }
+
+  function selectPreset(amount) {
+    onBet(amount)
   }
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-cp-muted font-medium">
-        Bet:{' '}
-        <span className="text-amber-400 font-semibold">{formatCoins(bet)} coins</span>
-      </p>
+      {/* ── Amount input ── */}
+      <div>
+        <label className="block text-xs font-semibold text-cp-muted uppercase tracking-wider mb-1.5">
+          Bet Amount
+        </label>
+        <div className="relative">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-400 pointer-events-none select-none">
+            🪙
+          </span>
+          <input
+            type="number"
+            min={1}
+            max={balance}
+            value={raw}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            disabled={disabled}
+            className={`w-full bg-cp-elevated border border-cp-border rounded-xl pl-9 pr-4 py-3
+              text-base font-bold text-amber-400
+              placeholder:text-cp-muted/50 focus:border-amber-400/60 focus:outline-none transition-colors
+              [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none
+              ${disabled ? 'opacity-40 cursor-not-allowed' : ''}
+            `}
+            placeholder="0"
+          />
+        </div>
+        {balance > 0 && (
+          <p className="text-xs text-cp-muted/60 mt-1.5">
+            Balance:{' '}
+            <span className="text-amber-400 font-semibold">{formatCoins(balance)} coins</span>
+          </p>
+        )}
+      </div>
 
-      {/* Chip buttons */}
+      {/* ── Quick-select chips ── */}
       <div className="flex flex-wrap gap-2">
-        {validPresets.map((preset) => (
+        {validPresets.map(preset => (
           <button
             key={preset}
-            onClick={() => onBet(preset)}
+            onClick={() => selectPreset(preset)}
             disabled={disabled}
             className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-all
               ${bet === preset
@@ -117,10 +164,27 @@ export function BetChips({ bet, onBet, balance, disabled }) {
           </button>
         ))}
 
-        {/* MAX button */}
+        {/* ½ balance */}
+        {balance >= 2 && (
+          <button
+            onClick={() => selectPreset(half)}
+            disabled={disabled}
+            className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-all
+              ${bet === half
+                ? 'bg-amber-400 border-amber-400 text-black'
+                : 'bg-cp-card border-cp-border text-cp-muted hover:border-amber-400/50 hover:text-cp-text'
+              }
+              ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}
+            `}
+          >
+            ½
+          </button>
+        )}
+
+        {/* MAX */}
         {balance > 0 && (
           <button
-            onClick={() => onBet(balance)}
+            onClick={() => selectPreset(balance)}
             disabled={disabled}
             className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-all
               ${bet === balance
@@ -134,22 +198,6 @@ export function BetChips({ bet, onBet, balance, disabled }) {
           </button>
         )}
       </div>
-
-      {/* Custom amount input */}
-      <input
-        type="number"
-        min={1}
-        max={balance}
-        value={bet}
-        onChange={handleCustom}
-        disabled={disabled}
-        className={`w-full bg-cp-card border border-cp-border rounded-xl px-4 py-2.5 text-sm text-cp-text
-          placeholder:text-cp-muted focus:border-amber-400/60 focus:ring-0 transition-colors
-          [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none
-          ${disabled ? 'opacity-40 cursor-not-allowed' : ''}
-        `}
-        placeholder="Custom amount…"
-      />
     </div>
   )
 }

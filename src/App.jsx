@@ -17,12 +17,20 @@ import SlotsGame from './pages/casino/SlotsGame'
 import AviatorGame from './pages/casino/AviatorGame'
 import ChickenRoadGame from './pages/casino/ChickenRoadGame'
 import MinesGame from './pages/casino/MinesGame'
+import PlinkoGame from './pages/casino/PlinkoGame'
 
 function WithNav({ children }) {
+  const { chatOpen } = useApp()
   return (
     <>
       <Navbar />
-      <main className="pt-16 min-h-screen bg-cp-bg">{children}</main>
+      <main
+        className={`pt-16 min-h-screen bg-cp-bg transition-[padding] duration-300 ${
+          chatOpen ? 'lg:pr-[300px]' : ''
+        }`}
+      >
+        {children}
+      </main>
     </>
   )
 }
@@ -119,6 +127,11 @@ function AppRoutes() {
       <Route path="/casino/mines" element={
         <ProtectedRoute>
           <WithNav><MinesGame /></WithNav>
+        </ProtectedRoute>
+      } />
+      <Route path="/casino/plinko" element={
+        <ProtectedRoute>
+          <WithNav><PlinkoGame /></WithNav>
         </ProtectedRoute>
       } />
 

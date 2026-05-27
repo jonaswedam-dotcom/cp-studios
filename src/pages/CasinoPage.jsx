@@ -54,16 +54,74 @@ const GAMES = [
     name:        'Mines',
     description: 'Avoid the mines, cash out anytime',
   },
+  {
+    route:       '/casino/plinko',
+    emoji:       '🔵',
+    name:        'Plinko',
+    description: 'Drop the ball, land a multiplier',
+  },
 ]
 
-// ── DonateModal ───────────────────────────────────────────────────────────────
-function DonateModal({ recipient, senderBalance, onClose, onDonate }) {
-  const [rawAmount, setRawAmount] = useState('')
-  const [error, setError]         = useState('')
-  const [loading, setLoading]     = useState(false)
+// ── Helper: resolve display names for wallet entries ──────────────────────────
+async function resolveNames(currentUserId, currentUserName) {
+  const [walletsRes, profilesRes, pendingRes] = await Promise.all([
+    supabase
+      .from('wallets')
+      .select('user_id, balance')
+      .order('balance', { ascending: false })
+      .limit(20),
+    supabase.from('profiles').select('user_id, full_name'),
+    supabase.from('pending_users').select('user_id, username, email'),
+  ])
 
-  const parsed  = parseInt(rawAmount, 10)
-  const isValid = !isNaN(parsed) && parsed >= 1 && parsed <= senderBalance
+  const wallets  = walletsRes.data  ?? []
+  const profiles = profilesRes.data ?? []
+  const pending  = pendingRes.data  ?? []
+
+  const nameMap = {}
+  for (const p of profiles) {
+    if (p.user_id) nameMap[p.user_id] = p.full_name
+  }
+  const fallbackMap = {}
+  for (const u of pending) {
+    if (u.user_id) {
+      fallbackMap[u.user_id] = u.username || u.email?.split('@')[0] || null
+    }
+  }
+
+  return wallets.map(w => ({
+    user_id:     w.user_id,
+    balance:     w.balance,
+    displayName:
+      nameMap[w.user_id]
+      ?? fallbackMap[w.user_id]
+      ?? (w.user_id === currentUserId ? currentUserName : null)
+      ?? 'Player',
+  }))
+}
+
+// ── SendCoinsModal ─────────────────────────────────────────────────────────────
+function SendCoinsModal({ senderBalance, onClose, onDonate }) {
+  const { currentUser } = useApp()
+
+  const [players,   setPlayers]   = useState([])        // all wallet holders
+  const [loading,   setLoading]   = useState(true)
+  const [search,    setSearch]    = useState('')
+  const [selected,  setSelected]  = useState(null)      // player entry | null
+  const [rawAmount, setRawAmount] = useState('')
+  const [error,     setError]     = useState('')
+  const [sending,   setSending]   = useState(false)
+  const searchRef   = useRef(null)
+
+  // Load all players once on open
+  useEffect(() => {
+    resolveNames(currentUser?.id, currentUser?.name).then(all => {
+      // Exclude self
+      setPlayers(all.filter(p => p.user_id !== currentUser?.id))
+      setLoading(false)
+      setTimeout(() => searchRef.current?.focus(), 30)
+    })
+  }, [currentUser?.id, currentUser?.name])
 
   // Close on Escape
   useEffect(() => {
@@ -72,7 +130,17 @@ function DonateModal({ recipient, senderBalance, onClose, onDonate }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  const filtered = search.trim()
+    ? players.filter(p =>
+        p.displayName.toLowerCase().includes(search.trim().toLowerCase())
+      )
+    : players
+
+  const parsed  = parseInt(rawAmount, 10)
+  const isValid = !isNaN(parsed) && parsed >= 1 && parsed <= senderBalance
+
   async function handleConfirm() {
+    if (!selected) { setError('Select a recipient first'); return }
     if (isNaN(parsed) || parsed < 1) {
       setError('Enter a valid amount (minimum 1 coin)')
       return
@@ -81,22 +149,18 @@ function DonateModal({ recipient, senderBalance, onClose, onDonate }) {
       setError(`You only have ${senderBalance.toLocaleString()} coins`)
       return
     }
-
-    setLoading(true)
+    setSending(true)
     setError('')
-
     const { error: rpcErr } = await supabase.rpc('donate_coins', {
-      p_recipient_id: recipient.user_id,
+      p_recipient_id: selected.user_id,
       p_amount:       parsed,
     })
-
     if (rpcErr) {
-      setError(rpcErr.message || 'Donation failed — please try again')
-      setLoading(false)
+      setError(rpcErr.message || 'Transfer failed — please try again')
+      setSending(false)
       return
     }
-
-    onDonate(parsed)
+    onDonate(parsed, selected.displayName)
   }
 
   return (
@@ -104,12 +168,11 @@ function DonateModal({ recipient, senderBalance, onClose, onDonate }) {
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.72)' }}
     >
-      {/* Backdrop */}
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative bg-cp-card border border-cp-border rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+      <div className="relative bg-cp-card border border-cp-border rounded-2xl p-6 w-full max-w-sm shadow-2xl flex flex-col gap-4 max-h-[90vh]">
         {/* Header */}
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between">
           <h3 className="text-lg font-bold text-cp-text">Send Coins 🪙</h3>
           <button
             onClick={onClose}
@@ -119,186 +182,169 @@ function DonateModal({ recipient, senderBalance, onClose, onDonate }) {
           </button>
         </div>
 
-        <p className="text-sm text-cp-muted mb-4">
-          Donating to{' '}
-          <span className="text-amber-400 font-semibold">{recipient.displayName}</span>
-        </p>
+        {/* Step 1: Pick recipient */}
+        {!selected ? (
+          <div className="flex flex-col gap-3 overflow-hidden">
+            <div>
+              <label className="block text-xs font-semibold text-cp-muted uppercase tracking-wider mb-1.5">
+                Recipient
+              </label>
+              <input
+                ref={searchRef}
+                type="text"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search by name…"
+                className="w-full bg-cp-elevated border border-cp-border rounded-xl px-4 py-2.5 text-sm text-cp-text
+                  placeholder:text-cp-muted/50 focus:border-amber-400/60 focus:outline-none transition-colors"
+              />
+            </div>
 
-        {/* Amount */}
-        <div className="mb-4">
-          <label className="block text-xs font-semibold text-cp-muted uppercase tracking-wider mb-1.5">
-            Amount
-          </label>
-          <input
-            type="number"
-            min={1}
-            max={senderBalance}
-            value={rawAmount}
-            onChange={e => { setRawAmount(e.target.value); setError('') }}
-            onKeyDown={e => e.key === 'Enter' && isValid && handleConfirm()}
-            placeholder="0"
-            autoFocus
-            className="w-full bg-cp-elevated border border-cp-border rounded-xl px-4 py-2.5 text-base text-cp-text font-semibold
-              focus:border-amber-400/60 focus:outline-none transition-colors
-              [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-          />
-          <p className="text-xs text-cp-muted mt-1.5">
-            Your balance:{' '}
-            <span className="text-amber-400 font-semibold">{senderBalance.toLocaleString()} coins</span>
-          </p>
-        </div>
+            <div className="overflow-y-auto max-h-52 space-y-1">
+              {loading ? (
+                <div className="flex justify-center py-6">
+                  <div className="w-5 h-5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : filtered.length === 0 ? (
+                <p className="text-cp-muted text-sm text-center py-4">
+                  {search.trim() ? 'No players match that name' : 'No other players found'}
+                </p>
+              ) : (
+                filtered.map(player => (
+                  <button
+                    key={player.user_id}
+                    onClick={() => setSelected(player)}
+                    className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl
+                      bg-cp-elevated border border-cp-border hover:border-amber-400/40 hover:bg-cp-elevated/80
+                      text-left transition-all group"
+                  >
+                    <span className="font-semibold text-sm text-cp-text group-hover:text-amber-400 transition-colors truncate">
+                      {player.displayName}
+                    </span>
+                    <span className="text-xs text-cp-muted tabular-nums ml-2 flex-shrink-0">
+                      🪙 {player.balance.toLocaleString()}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        ) : (
+          /* Step 2: Enter amount */
+          <div className="flex flex-col gap-3">
+            {/* Recipient display + change button */}
+            <div className="flex items-center justify-between bg-cp-elevated border border-cp-border rounded-xl px-4 py-2.5">
+              <div>
+                <p className="text-xs text-cp-muted">Sending to</p>
+                <p className="font-semibold text-sm text-amber-400">{selected.displayName}</p>
+              </div>
+              <button
+                onClick={() => { setSelected(null); setRawAmount(''); setError('') }}
+                className="text-xs text-cp-muted hover:text-cp-text transition-colors"
+              >
+                Change
+              </button>
+            </div>
 
-        {/* Error */}
-        {error && (
-          <div className="mb-3 px-3 py-2 rounded-lg bg-red-400/10 border border-red-400/20 text-red-400 text-sm">
-            {error}
+            {/* Amount input */}
+            <div>
+              <label className="block text-xs font-semibold text-cp-muted uppercase tracking-wider mb-1.5">
+                Amount
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={senderBalance}
+                value={rawAmount}
+                onChange={e => { setRawAmount(e.target.value); setError('') }}
+                onKeyDown={e => e.key === 'Enter' && isValid && handleConfirm()}
+                placeholder="0"
+                autoFocus
+                className="w-full bg-cp-elevated border border-cp-border rounded-xl px-4 py-2.5 text-base text-cp-text font-semibold
+                  focus:border-amber-400/60 focus:outline-none transition-colors
+                  [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              />
+              <p className="text-xs text-cp-muted mt-1.5">
+                Your balance:{' '}
+                <span className="text-amber-400 font-semibold">{senderBalance.toLocaleString()} coins</span>
+              </p>
+            </div>
+
+            {error && (
+              <div className="px-3 py-2 rounded-lg bg-red-400/10 border border-red-400/20 text-red-400 text-sm">
+                {error}
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                onClick={onClose}
+                disabled={sending}
+                className="flex-1 py-2.5 rounded-xl border border-cp-border bg-cp-elevated text-cp-muted hover:text-cp-text font-semibold text-sm transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirm}
+                disabled={sending || !rawAmount}
+                className={`flex-1 py-2.5 rounded-xl font-bold text-sm transition-all
+                  ${sending || !rawAmount
+                    ? 'bg-cp-elevated text-cp-muted cursor-not-allowed opacity-50'
+                    : 'bg-amber-400 hover:bg-amber-300 text-black active:scale-95'
+                  }
+                `}
+              >
+                {sending ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="w-3.5 h-3.5 border-2 border-black/40 border-t-black rounded-full animate-spin inline-block" />
+                    Sending…
+                  </span>
+                ) : (
+                  `Send${rawAmount && !isNaN(parsed) ? ` ${parsed.toLocaleString()}` : ''} coins`
+                )}
+              </button>
+            </div>
           </div>
         )}
-
-        {/* Actions */}
-        <div className="flex gap-3">
-          <button
-            onClick={onClose}
-            disabled={loading}
-            className="flex-1 py-2.5 rounded-xl border border-cp-border bg-cp-elevated text-cp-muted hover:text-cp-text hover:bg-cp-card font-semibold text-sm transition-all"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleConfirm}
-            disabled={loading || !rawAmount}
-            className={`flex-1 py-2.5 rounded-xl font-bold text-sm transition-all
-              ${loading || !rawAmount
-                ? 'bg-cp-elevated text-cp-muted cursor-not-allowed opacity-50'
-                : 'bg-amber-400 hover:bg-amber-300 text-black active:scale-95'
-              }
-            `}
-          >
-            {loading ? (
-              <span className="flex items-center justify-center gap-2">
-                <span className="w-3.5 h-3.5 border-2 border-black/40 border-t-black rounded-full animate-spin inline-block" />
-                Sending…
-              </span>
-            ) : (
-              `Send${rawAmount && !isNaN(parsed) ? ` ${parsed.toLocaleString()}` : ''} coins`
-            )}
-          </button>
-        </div>
       </div>
     </div>
   )
 }
 
 // ── Leaderboard ───────────────────────────────────────────────────────────────
-function LeaderboardSection() {
-  const { currentUser }        = useApp()
-  const { balance, loadBalance } = useCasino()
+function LeaderboardSection({ onRefresh }) {
+  const { currentUser }          = useApp()
+  const { loadBalance }          = useCasino()
   const [entries, setEntries]    = useState([])
   const [lbLoading, setLbLoading] = useState(true)
-  const [donateTarget, setDonateTarget] = useState(null)   // entry | null
-  const [successMsg, setSuccessMsg]     = useState('')      // '' | "You donated…"
-  const successTimerRef = useRef(null)
 
-  // Stable fetch function — re-created only when currentUser changes
   const fetchLeaderboard = useCallback(async () => {
     setLbLoading(true)
-
-    const [walletsRes, profilesRes, pendingRes] = await Promise.all([
-      supabase
-        .from('wallets')
-        .select('user_id, balance')
-        .order('balance', { ascending: false })
-        .limit(10),
-      // Primary name source: profiles.full_name
-      // Requires the "anyone authenticated can read all profiles" RLS policy
-      // from migration 009 to be applied in Supabase.
-      supabase
-        .from('profiles')
-        .select('user_id, full_name'),
-      // Secondary name source: pending_users.username / email prefix
-      // Non-admins can only read their own row, so this only helps as a
-      // self-fallback for non-admins, but the admin can see everyone here.
-      supabase
-        .from('pending_users')
-        .select('user_id, username, email'),
-    ])
-
-    // Surface query errors to console to aid debugging
-    if (walletsRes.error)  console.error('[Leaderboard] wallets error:',  walletsRes.error)
-    if (profilesRes.error) console.error('[Leaderboard] profiles error:', profilesRes.error)
-    if (pendingRes.error)  console.error('[Leaderboard] pending error:',  pendingRes.error)
-
-    const wallets  = walletsRes.data  ?? []
-    const profiles = profilesRes.data ?? []
-    const pending  = pendingRes.data  ?? []
-
-    // Primary lookup: user_id → full_name (null-guard: user_id can be null in profiles)
-    const nameMap = {}
-    for (const p of profiles) {
-      if (p.user_id) nameMap[p.user_id] = p.full_name
-    }
-
-    // Secondary lookup: user_id → username or email-prefix from pending_users
-    const fallbackMap = {}
-    for (const u of pending) {
-      if (u.user_id) {
-        fallbackMap[u.user_id] =
-          u.username || u.email?.split('@')[0] || null
-      }
-    }
-
-    setEntries(wallets.map(w => ({
-      user_id:     w.user_id,
-      balance:     w.balance,
-      displayName:
-        nameMap[w.user_id]                                              // profiles.full_name  (best)
-        ?? fallbackMap[w.user_id]                                       // pending_users name  (ok)
-        ?? (w.user_id === currentUser?.id ? currentUser?.name : null)   // own name fallback
-        ?? 'Player',                                                    // last resort
-    })))
+    const data = await resolveNames(currentUser?.id, currentUser?.name)
+    setEntries(data.slice(0, 10))
     setLbLoading(false)
   }, [currentUser?.id, currentUser?.name])
 
-  useEffect(() => {
-    fetchLeaderboard()
-  }, [fetchLeaderboard])
+  useEffect(() => { fetchLeaderboard() }, [fetchLeaderboard])
 
-  // Cleanup success timer on unmount
-  useEffect(() => () => clearTimeout(successTimerRef.current), [])
-
-  // Called by DonateModal on successful transfer
-  async function handleDonate(amount) {
-    const recipientName = donateTarget?.displayName ?? 'player'
-    setDonateTarget(null)
-
-    clearTimeout(successTimerRef.current)
-    setSuccessMsg(`You sent ${amount.toLocaleString()} coins to ${recipientName}! 🎉`)
-    successTimerRef.current = setTimeout(() => setSuccessMsg(''), 4000)
-
-    // Refresh both local balance and leaderboard rankings
+  // Expose a refresh function so parent can trigger after a donation
+  const refresh = useCallback(async () => {
     await Promise.all([loadBalance(), fetchLeaderboard()])
-  }
+  }, [loadBalance, fetchLeaderboard])
+
+  useEffect(() => {
+    if (onRefresh) onRefresh.current = refresh
+  })
 
   const rankMeta = [
     { emoji: '🥇', color: 'text-amber-400', bg: 'bg-amber-400/10 border-amber-400/20' },
-    { emoji: '🥈', color: 'text-slate-300', bg: 'bg-slate-300/10 border-slate-300/20' },
-    { emoji: '🥉', color: 'text-amber-600', bg: 'bg-amber-600/10 border-amber-600/20' },
+    { emoji: '🥈', color: 'text-slate-300',  bg: 'bg-slate-300/10 border-slate-300/20' },
+    { emoji: '🥉', color: 'text-amber-600',  bg: 'bg-amber-600/10 border-amber-600/20' },
   ]
 
   return (
     <section className="mt-12">
       <h2 className="text-xl font-bold text-cp-text mb-4">🏆 Leaderboard</h2>
-
-      {/* Donation success banner */}
-      {successMsg && (
-        <div
-          className="mb-4 flex items-center gap-2 bg-emerald-400/10 border border-emerald-400/25 rounded-xl px-4 py-3 text-emerald-400 font-semibold text-sm"
-          style={{ animation: 'fadeInResult 0.3s ease forwards' }}
-        >
-          <span>💸</span>
-          {successMsg}
-        </div>
-      )}
 
       {lbLoading ? (
         <div className="flex justify-center py-10">
@@ -309,14 +355,13 @@ function LeaderboardSection() {
       ) : (
         <div className="space-y-2">
           {entries.map((entry, idx) => {
-            const meta    = rankMeta[idx]
-            const isSelf  = entry.user_id === currentUser?.id
-            const canDonate = !isSelf && (balance ?? 0) > 0
+            const meta   = rankMeta[idx]
+            const isSelf = entry.user_id === currentUser?.id
 
             return (
               <div
                 key={entry.user_id}
-                className={`flex items-center gap-3 rounded-xl border px-4 py-3 transition-colors
+                className={`flex items-center gap-3 rounded-xl border px-4 py-3
                   ${meta ? meta.bg : 'bg-cp-card border-cp-border'}
                 `}
               >
@@ -330,11 +375,7 @@ function LeaderboardSection() {
                 </div>
 
                 {/* Display name */}
-                <span
-                  className={`flex-1 font-semibold text-sm truncate
-                    ${meta ? meta.color : 'text-cp-text'}
-                  `}
-                >
+                <span className={`flex-1 font-semibold text-sm truncate ${meta ? meta.color : 'text-cp-text'}`}>
                   {entry.displayName}
                   {isSelf && (
                     <span className="ml-1.5 text-xs text-cp-muted font-normal">(you)</span>
@@ -348,34 +389,12 @@ function LeaderboardSection() {
                     {entry.balance.toLocaleString()}
                   </span>
                 </div>
-
-                {/* Donate button — hidden for self */}
-                {canDonate && (
-                  <button
-                    onClick={() => setDonateTarget(entry)}
-                    className="flex-shrink-0 text-xs font-semibold px-2.5 py-1 rounded-lg
-                      border border-amber-400/30 text-amber-400
-                      hover:bg-amber-400/10 hover:border-amber-400/60
-                      transition-all active:scale-95"
-                  >
-                    Give
-                  </button>
-                )}
               </div>
             )
           })}
         </div>
       )}
 
-      {/* Donate modal */}
-      {donateTarget && (
-        <DonateModal
-          recipient={donateTarget}
-          senderBalance={balance ?? 0}
-          onClose={() => setDonateTarget(null)}
-          onDonate={handleDonate}
-        />
-      )}
     </section>
   )
 }
@@ -405,11 +424,29 @@ function DailyBonusToast({ amount }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function CasinoPage() {
   const { balance, claimRefill, canClaimRefill, dailyBonusAmount } = useCasino()
-  const [refillClaimed, setRefillClaimed] = useState(false)
+
+  const [refillClaimed,  setRefillClaimed]  = useState(false)
+  const [sendCoinsOpen,  setSendCoinsOpen]  = useState(false)
+  const [donateSuccessMsg, setDonateSuccessMsg] = useState('')
+
+  // Ref so LeaderboardSection can expose its refresh function
+  const lbRefreshRef = useRef(null)
+
+  const donateTimerRef = useRef(null)
+  useEffect(() => () => clearTimeout(donateTimerRef.current), [])
 
   async function handleRefill() {
     await claimRefill()
     setRefillClaimed(true)
+  }
+
+  function handleModalDonate(amount, recipientName) {
+    setSendCoinsOpen(false)
+    clearTimeout(donateTimerRef.current)
+    setDonateSuccessMsg(`You sent ${amount.toLocaleString()} coins to ${recipientName}! 🎉`)
+    donateTimerRef.current = setTimeout(() => setDonateSuccessMsg(''), 4000)
+    // Refresh leaderboard + own balance
+    if (lbRefreshRef.current) lbRefreshRef.current()
   }
 
   const showRefillButton = balance === 0 && canClaimRefill()
@@ -418,15 +455,47 @@ export default function CasinoPage() {
   return (
     <div className="min-h-screen bg-cp-bg page-in">
       <DailyBonusToast amount={dailyBonusAmount} />
+
       <div className="max-w-4xl mx-auto px-4 py-10">
 
         {/* ── Header ── */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-extrabold text-cp-text tracking-tight">Casino</h1>
-          <p className="text-cp-muted mt-1 text-sm">
-            All fun, all fake — play responsibly 🎰
-          </p>
+        <div className="flex items-start justify-between mb-8 gap-4">
+          <div>
+            <h1 className="text-3xl font-extrabold text-cp-text tracking-tight">Casino</h1>
+            <p className="text-cp-muted mt-1 text-sm">
+              All fun, all fake — play responsibly 🎰
+            </p>
+          </div>
+
+          {/* Send Coins button */}
+          <button
+            onClick={() => setSendCoinsOpen(true)}
+            className="flex-shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl
+              border border-amber-400/30 bg-amber-400/5 text-amber-400
+              hover:bg-amber-400/15 hover:border-amber-400/60
+              font-semibold text-sm transition-all active:scale-95"
+          >
+            <span>💸</span>
+            Send Coins
+          </button>
         </div>
+
+        {/* Donate success banner */}
+        {donateSuccessMsg && (
+          <div
+            className="mb-6 flex items-center gap-2 bg-emerald-400/10 border border-emerald-400/25 rounded-xl px-4 py-3 text-emerald-400 font-semibold text-sm"
+            style={{ animation: 'fadeInDonate 0.3s ease forwards' }}
+          >
+            <span>💸</span>
+            {donateSuccessMsg}
+            <style>{`
+              @keyframes fadeInDonate {
+                from { opacity: 0; transform: translateY(6px); }
+                to   { opacity: 1; transform: translateY(0); }
+              }
+            `}</style>
+          </div>
+        )}
 
         {/* ── Balance card ── */}
         <div className="bg-cp-card border border-cp-border rounded-2xl p-6 mb-8 text-center">
@@ -441,11 +510,9 @@ export default function CasinoPage() {
           </div>
           <p className="text-cp-muted text-sm">coins</p>
 
-          {/* Broke banner */}
           {balance === 0 && (
             <div className="mt-4 bg-red-400/10 border border-red-400/25 rounded-xl px-4 py-3">
               <p className="text-red-400 font-semibold text-sm mb-3">You're broke! 💸</p>
-
               {showRefillButton && !refillClaimed && (
                 <button
                   onClick={handleRefill}
@@ -454,7 +521,6 @@ export default function CasinoPage() {
                   Claim 100 free coins
                 </button>
               )}
-
               {(showOutOfRefills || refillClaimed) && (
                 <p className="text-cp-muted text-xs">Out of refills today — come back tomorrow!</p>
               )}
@@ -464,7 +530,7 @@ export default function CasinoPage() {
 
         {/* ── Games grid ── */}
         <h2 className="text-lg font-bold text-cp-text mb-4">Games</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
           {GAMES.map((game) => (
             <Link
               key={game.route}
@@ -476,10 +542,7 @@ export default function CasinoPage() {
               <span className="text-4xl mb-1">{game.emoji}</span>
               <span className="text-sm font-bold text-cp-text leading-tight">{game.name}</span>
               <span className="text-xs text-cp-muted leading-snug">{game.description}</span>
-              <span
-                className="mt-auto text-xs font-semibold text-amber-400
-                  group-hover:text-amber-300 transition-colors"
-              >
+              <span className="mt-auto text-xs font-semibold text-amber-400 group-hover:text-amber-300 transition-colors">
                 Play →
               </span>
             </Link>
@@ -487,8 +550,17 @@ export default function CasinoPage() {
         </div>
 
         {/* ── Leaderboard ── */}
-        <LeaderboardSection />
+        <LeaderboardSection onRefresh={lbRefreshRef} />
       </div>
+
+      {/* ── Send Coins Modal ── */}
+      {sendCoinsOpen && (
+        <SendCoinsModal
+          senderBalance={balance ?? 0}
+          onClose={() => setSendCoinsOpen(false)}
+          onDonate={handleModalDonate}
+        />
+      )}
     </div>
   )
 }

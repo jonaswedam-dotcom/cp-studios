@@ -42,6 +42,20 @@ export default function CreateProfilePage() {
     setError('')
 
     try {
+      // Check for duplicate name (case-insensitive) before inserting
+      const { data: existing } = await supabase
+        .from('profiles')
+        .select('id')
+        .ilike('full_name', name.trim())
+        .limit(1)
+        .maybeSingle()
+
+      if (existing) {
+        setError('That name is already taken — please choose a different one.')
+        setLoading(false)
+        return
+      }
+
       let avatar_url = ''
 
       // Upload avatar to Storage if one was chosen

@@ -240,6 +240,19 @@ export default function Navbar() {
         return
       }
 
+      // Check for a conflicting profile name (case-insensitive)
+      const { data: existing } = await supabase
+        .from('profiles')
+        .select('id')
+        .ilike('full_name', trimmed)
+        .limit(1)
+        .maybeSingle()
+
+      if (existing) {
+        setNameError('That username is already taken — please choose a different one.')
+        return
+      }
+
       // Save to auth metadata (triggers onAuthStateChange → currentUser updates everywhere)
       await updateCurrentUser({ name: trimmed, avatar_url: currentUser.avatar })
 
