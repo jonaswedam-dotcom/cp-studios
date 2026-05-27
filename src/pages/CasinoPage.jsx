@@ -62,19 +62,41 @@ const GAMES = [
   },
 ]
 
-// ── Helper: fetch wallet holders with their display names ─────────────────────
-// Reads display_name directly from the wallets table — no join with profiles
-// needed, completely sidestepping the RLS issue on the profiles table.
-// display_name is written into wallets on first login (CasinoContext) and kept
-// in sync whenever the user renames themselves (Navbar → handleSaveName).
-async function resolveNames() {
+// ── Query helpers ─────────────────────────────────────────────────────────────
+// Both read display_name directly from wallets — no profiles join needed.
+
+// Send-Coins modal: every wallet except the sender's own, sorted A→Z by name.
+async function fetchRecipients(selfId) {
+  const q = supabase
+    .from('wallets')
+    .select('user_id, display_name, balance')
+    .order('display_name', { ascending: true, nullsFirst: false })
+
+  // Exclude self in the query when we have a valid id
+  if (selfId) q.neq('user_id', selfId)
+
+  const { data, error } = await q
+  if (error) {
+    console.error('[SendCoins] wallets query failed:', error.message, error)
+    return []
+  }
+  console.log('[SendCoins] wallets rows returned:', data?.length ?? 0)
+  return (data ?? []).map(row => ({
+    user_id:     row.user_id,
+    balance:     row.balance,
+    displayName: row.display_name || 'Player',
+  }))
+}
+
+// Leaderboard: all wallets, richest first, top 10.
+async function fetchLeaderboardEntries() {
   const { data, error } = await supabase
     .from('wallets')
-    .select('user_id, balance, display_name')
+    .select('user_id, display_name, balance')
     .order('balance', { ascending: false })
-    .limit(50)
+    .limit(10)
   if (error) {
-    console.error('wallets query error:', error)
+    console.error('[Leaderboard] wallets query failed:', error.message, error)
     return []
   }
   return (data ?? []).map(row => ({
@@ -97,11 +119,10 @@ function SendCoinsModal({ senderBalance, onClose, onDonate }) {
   const [sending,   setSending]   = useState(false)
   const searchRef   = useRef(null)
 
-  // Load all players once on open
+  // Load all players once on open (self excluded in the query via .neq)
   useEffect(() => {
-    resolveNames().then(all => {
-      // Exclude self
-      setPlayers(all.filter(p => p.user_id !== currentUser?.id))
+    fetchRecipients(currentUser?.id).then(rows => {
+      setPlayers(rows)
       setLoading(false)
       setTimeout(() => searchRef.current?.focus(), 30)
     })
@@ -304,8 +325,8 @@ function LeaderboardSection({ onRefresh }) {
 
   const fetchLeaderboard = useCallback(async () => {
     setLbLoading(true)
-    const data = await resolveNames()
-    setEntries(data.slice(0, 10))
+    const rows = await fetchLeaderboardEntries()
+    setEntries(rows)
     setLbLoading(false)
   }, [])
 
