@@ -62,19 +62,25 @@ const GAMES = [
   },
 ]
 
-// ── Helper: fetch wallet holders joined with their profile names ──────────────
-// Uses a SECURITY DEFINER RPC (get_wallet_players) so the profiles JOIN happens
-// inside Postgres, bypassing any RLS conflicts that blocked client-side queries.
+// ── Helper: fetch wallet holders with their display names ─────────────────────
+// Reads display_name directly from the wallets table — no join with profiles
+// needed, completely sidestepping the RLS issue on the profiles table.
+// display_name is written into wallets on first login (CasinoContext) and kept
+// in sync whenever the user renames themselves (Navbar → handleSaveName).
 async function resolveNames() {
-  const { data, error } = await supabase.rpc('get_wallet_players')
+  const { data, error } = await supabase
+    .from('wallets')
+    .select('user_id, balance, display_name')
+    .order('balance', { ascending: false })
+    .limit(50)
   if (error) {
-    console.error('get_wallet_players RPC error:', error)
+    console.error('wallets query error:', error)
     return []
   }
   return (data ?? []).map(row => ({
     user_id:     row.user_id,
     balance:     row.balance,
-    displayName: row.full_name,
+    displayName: row.display_name || 'Player',
   }))
 }
 

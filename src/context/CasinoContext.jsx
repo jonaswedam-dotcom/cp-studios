@@ -24,7 +24,7 @@ export function CasinoProvider({ children }) {
 
     const { data, error } = await supabase
       .from('wallets')
-      .select('balance, last_daily_bonus')
+      .select('balance, last_daily_bonus, display_name')
       .eq('user_id', userId)
       .maybeSingle()
 
@@ -35,6 +35,15 @@ export function CasinoProvider({ children }) {
     }
 
     if (data) {
+      // Opportunistically backfill display_name for wallets created before migration 012
+      if (!data.display_name) {
+        const name = session?.user?.user_metadata?.full_name
+        if (name) {
+          supabase.from('wallets').update({ display_name: name }).eq('user_id', userId)
+            .then(({ error: e }) => { if (e) console.error('[CasinoContext] display_name backfill error:', e) })
+        }
+      }
+
       let newBalance = data.balance
 
       // Check if daily bonus is due
@@ -63,11 +72,18 @@ export function CasinoProvider({ children }) {
 
       setBalance(newBalance)
     } else {
-      // First visit — create wallet with 1000 starting coins + first daily bonus
-      const startBalance = 1000 + DAILY_BONUS_AMOUNT
+      // First visit — create wallet with 1000 starting coins + first daily bonus.
+      // Store the user's display name so the leaderboard never needs a profiles join.
+      const startBalance  = 1000 + DAILY_BONUS_AMOUNT
+      const displayName   = session?.user?.user_metadata?.full_name || null
       const { data: created, error: insertError } = await supabase
         .from('wallets')
-        .insert({ user_id: userId, balance: startBalance, last_daily_bonus: new Date().toISOString() })
+        .insert({
+          user_id:          userId,
+          balance:          startBalance,
+          last_daily_bonus: new Date().toISOString(),
+          display_name:     displayName,
+        })
         .select('balance')
         .single()
 

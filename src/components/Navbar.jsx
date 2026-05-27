@@ -256,6 +256,13 @@ export default function Navbar() {
       // Save to auth metadata (triggers onAuthStateChange → currentUser updates everywhere)
       await updateCurrentUser({ name: trimmed, avatar_url: currentUser.avatar })
 
+      // Mirror the new name into wallets.display_name so the leaderboard and
+      // Send-Coins modal show the updated name without any profiles join.
+      await supabase
+        .from('wallets')
+        .update({ display_name: trimmed })
+        .eq('user_id', currentUser.id)
+
       // Record the change
       await supabase.from('username_changes').insert({ user_id: currentUser.id })
 

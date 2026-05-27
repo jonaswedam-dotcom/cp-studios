@@ -97,7 +97,7 @@ function rrect(ctx, x, y, w, h, r) {
 }
 
 // ─── Draw the full board onto the canvas ──────────────────────────────────────
-function drawScene(canvas, mults, geom, ballX, ballY, litSlot) {
+function drawScene(canvas, mults, geom, ballX, ballY, litSlot, trail = []) {
   const dpr = window.devicePixelRatio || 1
   const ctx = canvas.getContext('2d')
   const { CH, pegs, SLOT_W, SLOT_Y, SLOT_H, PEG_R, BALL_R, slotCX } = geom
@@ -150,9 +150,25 @@ function drawScene(canvas, mults, geom, ballX, ballY, litSlot) {
     ctx.font          = `bold ${fontSize}px system-ui, -apple-system, sans-serif`
     ctx.textAlign     = 'center'
     ctx.textBaseline  = 'middle'
-    ctx.fillText(`${m}×`, x + w / 2, y + h / 2)
+    // Abbreviate 1000 → "1K" so it fits in narrow 16-row slots
+    const label = m >= 1000 ? `${Math.round(m / 1000)}K×` : `${m}×`
+    ctx.fillText(label, x + w / 2, y + h / 2)
     ctx.restore()
   })
+
+  // ── Ball trail ──
+  if (trail.length > 0 && ballX != null) {
+    trail.forEach(({ x: tx, y: ty }, i) => {
+      const alpha = ((i + 1) / trail.length) * 0.3
+      ctx.save()
+      ctx.globalAlpha = alpha
+      ctx.beginPath()
+      ctx.arc(tx, ty, BALL_R * 0.65, 0, Math.PI * 2)
+      ctx.fillStyle = '#fbbf24'
+      ctx.fill()
+      ctx.restore()
+    })
+  }
 
   // ── Pegs ──
   pegs.forEach(({ x, y }) => {
@@ -206,6 +222,7 @@ export default function PlinkoGame() {
 
   const canvasRef = useRef(null)
   const rafRef    = useRef(null)
+  const trailRef  = useRef([])
 
   // ── Resize canvas + redraw idle/done state ────────────────────────────────
   useEffect(() => {
@@ -232,6 +249,7 @@ export default function PlinkoGame() {
     setPhase('dropping')
     setResult(null)
     setLitSlot(null)
+    trailRef.current = []
 
     const g      = makeGeom(rows)
     const mults  = MULT_TABLE[rows][risk]
@@ -251,18 +269,16 @@ export default function PlinkoGame() {
     const payout    = Math.floor(bet * mult)
     const winAmount = payout - bet
 
-    // Build bezier arc segments
-    // Control point is directly below p0 (halfway down), creating a
-    // "fall straight then curve sideways" motion that looks like a peg bounce
+    // Build bezier arc segments.
+    // cp at (p1.x, p0.y) creates realistic peg-bounce physics:
+    //   x component → ease-out (ball shoots sideways fast then decelerates)
+    //   y component → simplifies to (1-t²)·p0y + t²·p1y = natural gravity ease-in
     const segs = pts.slice(0, -1).map((p0, i) => {
       const p1 = pts[i + 1]
       return {
         p0,
         p1,
-        cp: {
-          x: p0.x,
-          y: p0.y + (p1.y - p0.y) * 0.45,
-        },
+        cp: { x: p1.x, y: p0.y },
       }
     })
 
@@ -281,7 +297,11 @@ export default function PlinkoGame() {
       const { p0, cp, p1 } = segs[segIdx]
       const { x: bx, y: by } = qBez(et, p0, cp, p1)
 
-      drawScene(canvas, mults, g, bx, by, null)
+      // Update trail (keep last 5 positions)
+      trailRef.current.push({ x: bx, y: by })
+      if (trailRef.current.length > 5) trailRef.current.shift()
+
+      drawScene(canvas, mults, g, bx, by, null, trailRef.current)
 
       if (rawT >= 1) {
         segIdx++
@@ -386,7 +406,9 @@ export default function PlinkoGame() {
             className={`w-full max-w-sm rounded-2xl border px-5 py-4 text-center
               ${result.winAmount > 0
                 ? 'bg-emerald-400/10 border-emerald-400/25'
-                : 'bg-red-400/10 border-red-400/25'
+                : result.winAmount === 0
+                  ? 'bg-blue-400/10 border-blue-400/25'
+                  : 'bg-red-400/10 border-red-400/25'
               }`}
             style={{ animation: 'fadeInPlinko 0.3s ease forwards' }}
           >
@@ -394,12 +416,18 @@ export default function PlinkoGame() {
               className="text-2xl font-extrabold mb-1"
               style={{ color: slotColor(result.mult).bg }}
             >
-              {result.mult}×
+              {result.mult >= 1000 ? `${Math.round(result.mult / 1000)}K×` : `${result.mult}×`}
             </p>
-            <p className={`text-lg font-bold ${result.winAmount > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            <p className={`text-lg font-bold ${
+              result.winAmount > 0 ? 'text-emerald-400'
+              : result.winAmount === 0 ? 'text-blue-400'
+              : 'text-red-400'
+            }`}>
               {result.winAmount > 0
                 ? `+${formatCoins(result.winAmount)} coins 🎉`
-                : `-${formatCoins(Math.abs(result.winAmount))} coins`
+                : result.winAmount === 0
+                  ? 'Push — bet returned'
+                  : `-${formatCoins(Math.abs(result.winAmount))} coins`
               }
             </p>
             <style>{`
