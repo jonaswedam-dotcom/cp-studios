@@ -8,7 +8,8 @@ function getMult(revealed, mines) {
   for (let i = 0; i < revealed; i++) {
     m *= (25 - i) / (25 - mines - i)
   }
-  return +(m * 0.95).toFixed(2)
+  // Floor at 1.01 so even 1-mine games always show a positive multiplier
+  return +Math.max(1.01, m * 0.95).toFixed(2)
 }
 
 // ── Grid generation ───────────────────────────────────────────────────────────
@@ -88,7 +89,7 @@ export default function MinesGame() {
 
   const [phase, setPhase]             = useState('setup')    // 'setup'|'playing'|'dead'|'cashedout'
   const [grid, setGrid]               = useState(() => buildGrid(5))
-  const [mineCount, setMineCount]     = useState(5)
+  const [mineCount, setMineCount]     = useState(3)
   const [bet, setBet]                 = useState(50)
   const [safeRevealed, setSafeRevealed] = useState(0)
   const [gameResult, setGameResult]   = useState(null)
@@ -198,7 +199,7 @@ export default function MinesGame() {
                 Mines: <span className="text-red-400 font-bold">{mineCount}</span>
               </p>
               <div className="flex gap-2">
-                {[3, 5, 7, 10, 15].map((n) => (
+                {[1, 3, 5, 7, 10].map((n) => (
                   <button
                     key={n}
                     onClick={() => setMineCount(n)}

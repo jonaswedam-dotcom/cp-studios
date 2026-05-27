@@ -6,13 +6,37 @@ export function formatCoins(n) {
   return n.toLocaleString()
 }
 
+// ── DailyBonusToast ───────────────────────────────────────────────────────────
+function DailyBonusToast({ amount }) {
+  if (!amount) return null
+  return (
+    <div
+      className="fixed top-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5
+        bg-amber-400 text-black font-bold text-sm px-5 py-3 rounded-2xl
+        shadow-[0_4px_24px_rgba(251,191,36,0.45)]"
+      style={{ animation: 'bonusSlideIn 0.35s cubic-bezier(0.34,1.56,0.64,1) forwards' }}
+    >
+      <span className="text-lg">🎁</span>
+      Daily bonus: +{formatCoins(amount)} coins!
+      <style>{`
+        @keyframes bonusSlideIn {
+          from { opacity: 0; transform: translateX(-50%) translateY(-12px) scale(0.92); }
+          to   { opacity: 1; transform: translateX(-50%) translateY(0)      scale(1);    }
+        }
+      `}</style>
+    </div>
+  )
+}
+
 // ── GameLayout ────────────────────────────────────────────────────────────────
 export function GameLayout({ title, children }) {
   const navigate = useNavigate()
-  const { balance } = useCasino()
+  const { balance, dailyBonusAmount } = useCasino()
 
   return (
     <div className="min-h-screen bg-cp-bg">
+      <DailyBonusToast amount={dailyBonusAmount} />
+
       <div className="max-w-2xl mx-auto px-4 py-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">

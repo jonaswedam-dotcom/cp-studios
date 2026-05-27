@@ -1,16 +1,21 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../supabase'
 import { useApp } from './AppContext'
 
 const CasinoContext = createContext(null)
 export const useCasino = () => useContext(CasinoContext)
 
+const DAILY_BONUS_AMOUNT = 100
+
 export function CasinoProvider({ children }) {
   const { session } = useApp()
   const userId = session?.user?.id ?? null
 
-  const [balance, setBalance] = useState(null)
-  const [loading, setLoading] = useState(false)
+  const [balance, setBalance]               = useState(null)
+  const [loading, setLoading]               = useState(false)
+  const [dailyBonusAmount, setDailyBonusAmount] = useState(0)
+
+  const bonusTimerRef = useRef(null)
 
   // ── Load (or create) the wallet row ───────────────────────────────────────
   const loadBalance = useCallback(async () => {
@@ -19,7 +24,7 @@ export function CasinoProvider({ children }) {
 
     const { data, error } = await supabase
       .from('wallets')
-      .select('balance')
+      .select('balance, last_daily_bonus')
       .eq('user_id', userId)
       .maybeSingle()
 
@@ -30,12 +35,39 @@ export function CasinoProvider({ children }) {
     }
 
     if (data) {
-      setBalance(data.balance)
+      let newBalance = data.balance
+
+      // Check if daily bonus is due
+      const lastBonus = data.last_daily_bonus ? new Date(data.last_daily_bonus) : null
+      const now = new Date()
+      const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+      const isDue = !lastBonus || lastBonus < twentyFourHoursAgo
+
+      if (isDue) {
+        newBalance = newBalance + DAILY_BONUS_AMOUNT
+        const { error: updateError } = await supabase
+          .from('wallets')
+          .update({ balance: newBalance, last_daily_bonus: now.toISOString() })
+          .eq('user_id', userId)
+
+        if (updateError) {
+          console.error('[CasinoContext] daily bonus update error:', updateError)
+          newBalance = data.balance  // revert on error
+        } else {
+          // Show toast for 5 seconds
+          setDailyBonusAmount(DAILY_BONUS_AMOUNT)
+          clearTimeout(bonusTimerRef.current)
+          bonusTimerRef.current = setTimeout(() => setDailyBonusAmount(0), 5000)
+        }
+      }
+
+      setBalance(newBalance)
     } else {
-      // First visit — create wallet with 1000 starting coins
+      // First visit — create wallet with 1000 starting coins + first daily bonus
+      const startBalance = 1000 + DAILY_BONUS_AMOUNT
       const { data: created, error: insertError } = await supabase
         .from('wallets')
-        .insert({ user_id: userId, balance: 1000 })
+        .insert({ user_id: userId, balance: startBalance, last_daily_bonus: new Date().toISOString() })
         .select('balance')
         .single()
 
@@ -43,6 +75,9 @@ export function CasinoProvider({ children }) {
         console.error('[CasinoContext] wallet insert error:', insertError)
       } else {
         setBalance(created.balance)
+        setDailyBonusAmount(DAILY_BONUS_AMOUNT)
+        clearTimeout(bonusTimerRef.current)
+        bonusTimerRef.current = setTimeout(() => setDailyBonusAmount(0), 5000)
       }
     }
 
@@ -52,17 +87,23 @@ export function CasinoProvider({ children }) {
   useEffect(() => {
     if (!userId) {
       setBalance(null)
+      setDailyBonusAmount(0)
       return
     }
     loadBalance()
   }, [userId, loadBalance])
+
+  // Cleanup bonus timer on unmount
+  useEffect(() => {
+    return () => clearTimeout(bonusTimerRef.current)
+  }, [])
 
   // ── Place a bet ───────────────────────────────────────────────────────────
   // winAmount: net change (positive = won, negative = lost, 0 = push)
   const placeBet = useCallback(async (game, bet, winAmount) => {
     if (!userId) throw new Error('Not authenticated')
 
-    const newBalance = Math.max(0, balance + winAmount)
+    const newBalance = Math.max(0, (balance ?? 0) + winAmount)
     const result     = winAmount > 0 ? 'win' : winAmount === 0 ? 'push' : 'loss'
     const payout     = winAmount >= 0 ? bet + winAmount : 0
 
@@ -83,7 +124,7 @@ export function CasinoProvider({ children }) {
     return newBalance
   }, [userId, balance])
 
-  // ── Daily refill ──────────────────────────────────────────────────────────
+  // ── Daily refill (emergency, when broke) ─────────────────────────────────
   const _refillKey = userId ? `cp-studios:casino-refill:${userId}` : null
   const _todayStr  = new Date().toISOString().slice(0, 10) // "YYYY-MM-DD"
 
@@ -120,6 +161,7 @@ export function CasinoProvider({ children }) {
         placeBet,
         claimRefill,
         canClaimRefill,
+        dailyBonusAmount,
       }}
     >
       {children}

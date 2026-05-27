@@ -174,9 +174,31 @@ function LeaderboardSection() {
   )
 }
 
+// ── Daily bonus toast ─────────────────────────────────────────────────────────
+function DailyBonusToast({ amount }) {
+  if (!amount) return null
+  return (
+    <div
+      className="fixed top-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5
+        bg-amber-400 text-black font-bold text-sm px-5 py-3 rounded-2xl
+        shadow-[0_4px_24px_rgba(251,191,36,0.45)]"
+      style={{ animation: 'bonusSlideIn 0.35s cubic-bezier(0.34,1.56,0.64,1) forwards' }}
+    >
+      <span className="text-lg">🎁</span>
+      Daily bonus: +{amount.toLocaleString()} coins!
+      <style>{`
+        @keyframes bonusSlideIn {
+          from { opacity: 0; transform: translateX(-50%) translateY(-12px) scale(0.92); }
+          to   { opacity: 1; transform: translateX(-50%) translateY(0)      scale(1);    }
+        }
+      `}</style>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function CasinoPage() {
-  const { balance, claimRefill, canClaimRefill } = useCasino()
+  const { balance, claimRefill, canClaimRefill, dailyBonusAmount } = useCasino()
   const [refillClaimed, setRefillClaimed] = useState(false)
 
   async function handleRefill() {
@@ -189,6 +211,7 @@ export default function CasinoPage() {
 
   return (
     <div className="min-h-screen bg-cp-bg page-in">
+      <DailyBonusToast amount={dailyBonusAmount} />
       <div className="max-w-4xl mx-auto px-4 py-10">
 
         {/* ── Header ── */}

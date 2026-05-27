@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { GameLayout, BetChips, ResultBanner, formatCoins } from './shared'
 import { useCasino } from '../../context/CasinoContext'
 
@@ -28,21 +28,24 @@ function planePos(m) {
 export default function AviatorGame() {
   const { balance, placeBet } = useCasino()
 
-  const [phase, setPhase] = useState('betting')         // 'betting' | 'flying' | 'crashed' | 'cashedout'
+  const [phase, setPhase]         = useState('betting')  // 'betting' | 'flying' | 'crashed' | 'cashedout'
   const [multiplier, setMultiplier] = useState(1.00)
-  const [bet, setBet] = useState(50)
+  const [bet, setBet]             = useState(50)
   const [cashedOutAt, setCashedOutAt] = useState(null)
   const [gameResult, setGameResult] = useState(null)
   const [wonAmount, setWonAmount] = useState(0)
 
-  const crashPointRef = useRef(null)
-  const intervalRef = useRef(null)
-  const currentMultRef = useRef(1.00)
-  const phaseRef = useRef('betting')
+  const crashPointRef    = useRef(null)
+  const currentMultRef   = useRef(1.00)
+  const betRef           = useRef(bet)
+  const placeBetRef      = useRef(placeBet)
+  const intervalRef      = useRef(null)
 
-  phaseRef.current = phase
+  // Keep refs current so the interval never captures stale values
+  useEffect(() => { betRef.current = bet }, [bet])
+  useEffect(() => { placeBetRef.current = placeBet }, [placeBet])
 
-  // Inject keyframes once
+  // ── Inject keyframes once ─────────────────────────────────────────────────
   useEffect(() => {
     const id = 'aviator-kf'
     if (!document.getElementById(id)) {
@@ -58,25 +61,14 @@ export default function AviatorGame() {
           70%  { box-shadow: 0 0 0 12px rgba(251,191,36,0); }
           100% { box-shadow: 0 0 0 0 rgba(251,191,36,0); }
         }
-        @keyframes trailFade {
-          from { opacity: 0.6; }
-          to   { opacity: 0; }
-        }
       `
       document.head.appendChild(s)
     }
   }, [])
 
-  function startFlight() {
-    if ((balance ?? 0) < bet) return
-
-    crashPointRef.current = generateCrash()
-    currentMultRef.current = 1.00
-    setMultiplier(1.00)
-    setCashedOutAt(null)
-    setGameResult(null)
-    setWonAmount(0)
-    setPhase('flying')
+  // ── Flight loop — driven by phase, not started in an event handler ────────
+  useEffect(() => {
+    if (phase !== 'flying') return
 
     intervalRef.current = setInterval(() => {
       const current = currentMultRef.current
@@ -88,26 +80,45 @@ export default function AviatorGame() {
         setMultiplier(crashPointRef.current)
         setPhase('crashed')
         setGameResult('loss')
-        setWonAmount(bet)
-        placeBet('aviator', bet, -bet)
+        setWonAmount(betRef.current)
+        placeBetRef.current('aviator', betRef.current, -betRef.current)
       } else {
         currentMultRef.current = next
         setMultiplier(next)
       }
     }, 80)
+
+    return () => clearInterval(intervalRef.current)
+  }, [phase])
+
+  // ── Cleanup on unmount ────────────────────────────────────────────────────
+  useEffect(() => {
+    return () => clearInterval(intervalRef.current)
+  }, [])
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+  function startFlight() {
+    if ((balance ?? 0) < bet) return
+    crashPointRef.current = generateCrash()
+    currentMultRef.current = 1.00
+    setMultiplier(1.00)
+    setCashedOutAt(null)
+    setGameResult(null)
+    setWonAmount(0)
+    setPhase('flying')   // triggers the useEffect above
   }
 
   function handleCashOut() {
-    if (phaseRef.current !== 'flying') return
+    if (phase !== 'flying') return
     clearInterval(intervalRef.current)
 
-    const m = currentMultRef.current
-    const win = Math.floor(bet * (m - 1))
+    const m   = currentMultRef.current
+    const win = Math.floor(betRef.current * (m - 1))
     setCashedOutAt(m)
     setPhase('cashedout')
     setGameResult('win')
     setWonAmount(win)
-    placeBet('aviator', bet, win)
+    placeBetRef.current('aviator', betRef.current, win)
   }
 
   function handlePlayAgain() {
@@ -120,10 +131,16 @@ export default function AviatorGame() {
     setWonAmount(0)
   }
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => clearInterval(intervalRef.current)
-  }, [])
+  // ── Loading guard ─────────────────────────────────────────────────────────
+  if (balance === null) {
+    return (
+      <GameLayout title="Aviator">
+        <div className="flex items-center justify-center h-48">
+          <div className="w-6 h-6 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+        </div>
+      </GameLayout>
+    )
+  }
 
   const isBetting   = phase === 'betting'
   const isFlying    = phase === 'flying'
@@ -162,7 +179,7 @@ export default function AviatorGame() {
           </svg>
 
           {/* Trajectory trail */}
-          {(isFlying || isCrashedOut || isCrashed) && (
+          {(isFlying || isCashedOut || isCrashed) && (
             <svg
               style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
               preserveAspectRatio="none"
@@ -272,25 +289,23 @@ export default function AviatorGame() {
         {/* ── Controls ── */}
         <div className="w-full max-w-md flex flex-col gap-4">
 
-          {/* Bet chips — only in betting phase */}
           {isBetting && (
             <div className="bg-cp-card border border-cp-border rounded-2xl p-4">
               <BetChips
                 bet={bet}
                 onBet={setBet}
-                balance={balance ?? 0}
+                balance={balance}
                 disabled={false}
               />
             </div>
           )}
 
-          {/* Main action button */}
           {isBetting && (
             <button
               onClick={startFlight}
-              disabled={(balance ?? 0) < bet}
+              disabled={balance < bet}
               className={`w-full py-3.5 rounded-2xl font-bold text-base tracking-wide transition-all
-                ${(balance ?? 0) < bet
+                ${balance < bet
                   ? 'bg-cp-elevated text-cp-muted cursor-not-allowed opacity-50'
                   : 'bg-amber-400 hover:bg-amber-300 text-black shadow-[0_0_24px_rgba(251,191,36,0.3)] hover:shadow-[0_0_32px_rgba(251,191,36,0.45)] active:scale-95'
                 }
