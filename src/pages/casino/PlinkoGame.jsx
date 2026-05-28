@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { GameLayout, BetChips, formatCoins } from './shared'
+import { GameLayout, BetChips } from './shared'
 import { useCasino } from '../../context/CasinoContext'
 
-// ─── Multiplier tables (Stake-accurate) ───────────────────────────────────────
+// ─── Multiplier tables (Stake-accurate) ──────────────────────────────────────
 const MULT_TABLE = {
   8: {
     low:    [5.6, 2.1, 1.1, 1.0, 0.5, 1.0, 1.1, 2.1, 5.6],
@@ -21,21 +21,49 @@ const MULT_TABLE = {
   },
 }
 
-// ─── Slot color ────────────────────────────────────────────────────────────────
-function slotColor(m) {
-  if (m >= 100) return { bg: '#7c3aed', border: '#a78bfa', text: '#fff', glow: 'rgba(124,58,237,0.85)' }
-  if (m >= 29)  return { bg: '#be185d', border: '#f472b6', text: '#fff', glow: 'rgba(190,24,93,0.75)'  }
-  if (m >= 10)  return { bg: '#dc2626', border: '#f87171', text: '#fff', glow: 'rgba(220,38,38,0.75)'  }
-  if (m >= 5)   return { bg: '#d97706', border: '#fbbf24', text: '#000', glow: 'rgba(217,119,6,0.75)'  }
-  if (m >= 2)   return { bg: '#059669', border: '#34d399', text: '#fff', glow: 'rgba(5,150,105,0.7)'   }
-  if (m >= 1)   return { bg: '#2563eb', border: '#60a5fa', text: '#fff', glow: 'rgba(37,99,235,0.65)'  }
-  if (m >= 0.4) return { bg: '#6d28d9', border: '#a78bfa', text: '#fff', glow: 'rgba(109,40,217,0.6)'  }
-  return             { bg: '#b91c1c', border: '#f87171', text: '#fff', glow: 'rgba(185,28,28,0.6)'     }
+// ─── Ball color palette ───────────────────────────────────────────────────────
+const BALL_COLORS = [
+  '#facc15', '#f97316', '#a78bfa', '#34d399',
+  '#60a5fa', '#f472b6', '#fb923c', '#4ade80',
+]
+
+const CW       = 480
+const FLASH_MS = 800
+
+// ─── Color helpers ────────────────────────────────────────────────────────────
+function hexToRGB(hex) {
+  const h = parseInt(hex.slice(1), 16)
+  return [(h >> 16) & 0xff, (h >> 8) & 0xff, h & 0xff]
 }
 
-// ─── Board geometry (derived from row count) ───────────────────────────────────
-const CW = 480
+function lerpRGB(a, b, t) {
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * t),
+    Math.round(a[1] + (b[1] - a[1]) * t),
+    Math.round(a[2] + (b[2] - a[2]) * t),
+  ]
+}
 
+// Returns 'rgb(r,g,b)' for slot i out of total slots
+// center (t=0) → teal, edge (t=1) → red
+function slotGradientColor(i, total) {
+  const t = Math.abs((i - (total - 1) / 2) / Math.max(1, (total - 1) / 2))
+  const stops = [
+    [0,    hexToRGB('#10b981')],
+    [0.33, hexToRGB('#eab308')],
+    [0.66, hexToRGB('#f97316')],
+    [1.0,  hexToRGB('#ef4444')],
+  ]
+  let s0 = stops[0], s1 = stops[1]
+  for (let k = 0; k < stops.length - 1; k++) {
+    if (t >= stops[k][0] && t <= stops[k + 1][0]) { s0 = stops[k]; s1 = stops[k + 1]; break }
+  }
+  const u   = s0[0] === s1[0] ? 0 : (t - s0[0]) / (s1[0] - s0[0])
+  const rgb = lerpRGB(s0[1], s1[1], u)
+  return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`
+}
+
+// ─── Board geometry ───────────────────────────────────────────────────────────
 function makeGeom(rows) {
   const TOP    = 54
   const ROW_H  = rows <= 8 ? 40 : rows <= 12 ? 35 : 29
@@ -54,12 +82,12 @@ function makeGeom(rows) {
   const pegs = []
   for (let r = 0; r < rows; r++)
     for (let c = 0; c <= r; c++)
-      pegs.push({ r, c, x: pegX(r, c), y: pegY(r) })
+      pegs.push({ x: pegX(r, c), y: pegY(r) })
 
   return { TOP, ROW_H, PEG_R, BALL_R, SLOTS, SLOT_W, SLOT_Y, SLOT_H, CH, pegX, pegY, slotCX, pegs }
 }
 
-// ─── Build ball waypoints from decisions ───────────────────────────────────────
+// ─── Build waypoints from random decisions ────────────────────────────────────
 function buildPath(rows, decisions, geom) {
   const { TOP, BALL_R, pegX, pegY, slotCX, SLOT_Y, SLOT_H } = geom
   const pts = [{ x: CW / 2, y: TOP - BALL_R - 2 }]
@@ -72,7 +100,7 @@ function buildPath(rows, decisions, geom) {
   return { pts, slot: col }
 }
 
-// ─── Quadratic bezier point ────────────────────────────────────────────────────
+// ─── Quadratic bezier ─────────────────────────────────────────────────────────
 function qBez(t, p0, cp, p1) {
   const u = 1 - t
   return {
@@ -81,7 +109,7 @@ function qBez(t, p0, cp, p1) {
   }
 }
 
-// ─── Rounded rect helper (Safari <15.4 compat) ────────────────────────────────
+// ─── Rounded rect (Safari compat) ────────────────────────────────────────────
 function rrect(ctx, x, y, w, h, r) {
   if (typeof ctx.roundRect === 'function') {
     ctx.roundRect(x, y, w, h, r)
@@ -96,25 +124,26 @@ function rrect(ctx, x, y, w, h, r) {
   }
 }
 
-// ─── Draw the full board onto the canvas ──────────────────────────────────────
-function drawScene(canvas, mults, geom, ballX, ballY, litSlot, trail = []) {
+// ─── Draw scene ───────────────────────────────────────────────────────────────
+// balls: array of { x, y, trail, color } — x/y null when not yet/no longer visible
+// litSlots: { [slotIdx]: landingTimestamp }
+// now: current RAF timestamp (for flash fade calculation)
+function drawScene(canvas, mults, geom, balls, litSlots, now) {
   const dpr = window.devicePixelRatio || 1
   const ctx = canvas.getContext('2d')
-  const { CH, pegs, SLOT_W, SLOT_Y, SLOT_H, PEG_R, BALL_R, slotCX } = geom
+  const { CH, pegs, SLOT_W, SLOT_Y, SLOT_H, PEG_R, BALL_R } = geom
+  const SLOTS = mults.length
 
   ctx.save()
   ctx.scale(dpr, dpr)
   ctx.clearRect(0, 0, CW, CH)
 
-  // ── Background gradient ──
-  const bgG = ctx.createLinearGradient(0, 0, 0, CH)
-  bgG.addColorStop(0, '#0f172a')
-  bgG.addColorStop(1, '#1e1b4b')
+  // ── Background ──
+  ctx.fillStyle = '#151515'
   rrect(ctx, 0, 0, CW, CH, 16)
-  ctx.fillStyle = bgG
   ctx.fill()
 
-  // ── Drop indicator arrow ──
+  // ── Drop indicator ──
   ctx.fillStyle = 'rgba(251,191,36,0.18)'
   ctx.beginPath()
   ctx.moveTo(CW / 2 - 9, 10)
@@ -125,86 +154,105 @@ function drawScene(canvas, mults, geom, ballX, ballY, litSlot, trail = []) {
 
   // ── Slots ──
   mults.forEach((m, i) => {
-    const { bg, border, text, glow } = slotColor(m)
-    const x   = i * SLOT_W + 2
-    const y   = SLOT_Y
-    const w   = SLOT_W - 4
-    const h   = SLOT_H
-    const lit = litSlot === i
+    const color    = slotGradientColor(i, SLOTS)
+    const x        = i * SLOT_W + 2
+    const y        = SLOT_Y
+    const w        = SLOT_W - 4
+    const h        = SLOT_H
+    const flashTs  = litSlots[i]
+    const flashAge = flashTs != null ? (now - flashTs) : Infinity
+    const lit      = flashAge < FLASH_MS
+    const ff       = lit ? Math.max(0, 1 - flashAge / FLASH_MS) : 0
 
     ctx.save()
-    if (lit) { ctx.shadowBlur = 24; ctx.shadowColor = glow }
-    ctx.fillStyle = lit ? bg : bg + '28'
-    rrect(ctx, x, y, w, h, 5)
+    if (lit) { ctx.shadowBlur = 24 * ff; ctx.shadowColor = color }
+    ctx.globalAlpha = lit ? Math.min(1, 0.6 + 0.4 * ff) : 0.5
+    ctx.fillStyle   = color
+    rrect(ctx, x, y, w, h, 6)
     ctx.fill()
-    if (lit) {
-      ctx.strokeStyle = border
-      ctx.lineWidth   = 2
-      rrect(ctx, x, y, w, h, 5)
-      ctx.stroke()
-    }
-    ctx.shadowBlur = 0
+    ctx.globalAlpha = 1
+    ctx.shadowBlur  = 0
 
-    const fontSize = m >= 100 ? 9 : m >= 10 ? 10 : 11
-    ctx.fillStyle     = lit ? text : bg + 'bb'
-    ctx.font          = `bold ${fontSize}px system-ui, -apple-system, sans-serif`
-    ctx.textAlign     = 'center'
-    ctx.textBaseline  = 'middle'
-    // Abbreviate 1000 → "1K" so it fits in narrow 16-row slots
-    const label = m >= 1000 ? `${Math.round(m / 1000)}K×` : `${m}×`
-    ctx.fillText(label, x + w / 2, y + h / 2)
+    if (lit && ff > 0.05) {
+      ctx.strokeStyle = color
+      ctx.lineWidth   = 1.5
+      ctx.globalAlpha = ff * 0.8
+      rrect(ctx, x, y, w, h, 6)
+      ctx.stroke()
+      ctx.globalAlpha = 1
+    }
+
+    const fontSize   = m >= 100 ? 9 : m >= 10 ? 10 : 11
+    ctx.globalAlpha  = lit ? 1 : 0.85
+    ctx.fillStyle    = '#fff'
+    ctx.font         = `bold ${fontSize}px system-ui, -apple-system, sans-serif`
+    ctx.textAlign    = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(
+      m >= 1000 ? `${Math.round(m / 1000)}K×` : `${m}×`,
+      x + w / 2,
+      y + h / 2,
+    )
+    ctx.globalAlpha = 1
     ctx.restore()
   })
 
-  // ── Ball trail ──
-  if (trail.length > 0 && ballX != null) {
-    trail.forEach(({ x: tx, y: ty }, i) => {
-      const alpha = ((i + 1) / trail.length) * 0.3
+  // ── Ball trails ──
+  balls.forEach(ball => {
+    if (!ball.trail || ball.trail.length < 2) return
+    ball.trail.forEach(({ x: tx, y: ty }, i) => {
       ctx.save()
-      ctx.globalAlpha = alpha
+      ctx.globalAlpha = ((i + 1) / ball.trail.length) * 0.25
       ctx.beginPath()
-      ctx.arc(tx, ty, BALL_R * 0.65, 0, Math.PI * 2)
-      ctx.fillStyle = '#fbbf24'
+      ctx.arc(tx, ty, BALL_R * 0.62, 0, Math.PI * 2)
+      ctx.fillStyle = ball.color
       ctx.fill()
       ctx.restore()
     })
-  }
+  })
 
   // ── Pegs ──
   pegs.forEach(({ x, y }) => {
-    const dist = ballX != null ? Math.hypot(x - ballX, y - ballY) : Infinity
-    const gf   = Math.max(0, 1 - dist / 28)
+    let minDist = Infinity
+    balls.forEach(b => {
+      if (b.x != null) {
+        const d = Math.hypot(x - b.x, y - b.y)
+        if (d < minDist) minDist = d
+      }
+    })
+    const gf = minDist < 50 ? Math.max(0, 1 - minDist / 28) : 0
 
     ctx.save()
-    if (gf > 0.05) {
-      ctx.shadowBlur  = 12 * gf
-      ctx.shadowColor = `rgba(255,255,255,${0.65 * gf})`
-    }
+    ctx.shadowBlur  = gf > 0.05 ? 14 * gf : 3
+    ctx.shadowColor = gf > 0.05
+      ? `rgba(255,255,255,${0.8 * gf})`
+      : 'rgba(255,255,255,0.12)'
     ctx.beginPath()
     ctx.arc(x, y, PEG_R, 0, Math.PI * 2)
-    ctx.fillStyle = gf > 0.35 ? '#e2e8f0' : '#4a5568'
+    ctx.fillStyle = gf > 0.3 ? '#ffffff' : 'rgba(255,255,255,0.82)'
     ctx.fill()
     ctx.restore()
   })
 
-  // ── Ball ──
-  if (ballX != null) {
+  // ── Balls ──
+  balls.forEach(ball => {
+    if (ball.x == null) return
     ctx.save()
-    ctx.shadowBlur  = 22
-    ctx.shadowColor = 'rgba(251,191,36,0.85)'
+    ctx.shadowBlur  = 20
+    ctx.shadowColor = ball.color
     const gr = ctx.createRadialGradient(
-      ballX - BALL_R * 0.3, ballY - BALL_R * 0.3, BALL_R * 0.05,
-      ballX, ballY, BALL_R
+      ball.x - BALL_R * 0.28, ball.y - BALL_R * 0.28, BALL_R * 0.05,
+      ball.x, ball.y, BALL_R,
     )
-    gr.addColorStop(0,   '#fef9c3')
-    gr.addColorStop(0.4, '#fbbf24')
-    gr.addColorStop(1,   '#b45309')
+    gr.addColorStop(0,    '#ffffff')
+    gr.addColorStop(0.35, ball.color)
+    gr.addColorStop(1,    ball.color + '80')
     ctx.beginPath()
-    ctx.arc(ballX, ballY, BALL_R, 0, Math.PI * 2)
+    ctx.arc(ball.x, ball.y, BALL_R, 0, Math.PI * 2)
     ctx.fillStyle = gr
     ctx.fill()
     ctx.restore()
-  }
+  })
 
   ctx.restore()
 }
@@ -213,160 +261,247 @@ function drawScene(canvas, mults, geom, ballX, ballY, litSlot, trail = []) {
 export default function PlinkoGame() {
   const { balance, placeBet } = useCasino()
 
-  const [bet,     setBet]     = useState(50)
-  const [rows,    setRows]    = useState(8)
-  const [risk,    setRisk]    = useState('medium')
-  const [phase,   setPhase]   = useState('idle')   // idle | dropping | done
-  const [litSlot, setLitSlot] = useState(null)
-  const [result,  setResult]  = useState(null)
+  const [bet,           setBet]           = useState(50)
+  const [rows,          setRows]          = useState(8)
+  const [risk,          setRisk]          = useState('medium')
+  const [autoActive,    setAutoActive]    = useState(false)
+  const [recentResults, setRecentResults] = useState([])
+  const [ballsActive,   setBallsActive]   = useState(false)
 
-  const canvasRef = useRef(null)
-  const rafRef    = useRef(null)
-  const trailRef  = useRef([])
+  const canvasRef    = useRef(null)
+  const rafRef       = useRef(null)
+  const autoRef      = useRef(null)
+  const loopUntilRef = useRef(0)        // keep RAF alive until this ts for slot fade
+  const ballsRef     = useRef([])        // active ball objects
+  const litSlotsRef  = useRef({})        // { slotIdx: landingTimestamp }
+  const ballIdRef    = useRef(0)
+  const inFlightRef  = useRef(0)         // sum of bet amounts currently animating
+  const balanceRef   = useRef(balance)
+  const betRef       = useRef(bet)
+  const geomRef      = useRef(makeGeom(8))
+  const multsRef     = useRef(MULT_TABLE[8]['medium'])
+  const rowsRef      = useRef(8)
+  const riskRef      = useRef('medium')
 
-  // ── Resize canvas + redraw idle/done state ────────────────────────────────
+  // Keep refs in sync with state/props
+  useEffect(() => { balanceRef.current = balance }, [balance])
+  useEffect(() => { betRef.current  = bet  }, [bet])
+  useEffect(() => { rowsRef.current = rows }, [rows])
+  useEffect(() => { riskRef.current = risk }, [risk])
+
+  // ── Setup canvas size + initial draw on rows/risk change ─────────────────
   useEffect(() => {
-    if (phase === 'dropping') return
+    geomRef.current  = makeGeom(rows)
+    multsRef.current = MULT_TABLE[rows][risk]
+
+    // Don't resize while balls are in flight — let the active animation finish
+    if (ballsRef.current.length > 0) return
     const canvas = canvasRef.current
     if (!canvas) return
-    const dpr   = window.devicePixelRatio || 1
-    const g     = makeGeom(rows)
-    const mults = MULT_TABLE[rows][risk]
+    const dpr = window.devicePixelRatio || 1
+    const g   = geomRef.current
     canvas.width        = Math.round(CW * dpr)
     canvas.height       = Math.round(g.CH * dpr)
     canvas.style.width  = `${CW}px`
     canvas.style.height = `${g.CH}px`
-    drawScene(canvas, mults, g, null, null, litSlot)
-  }, [rows, risk, phase, litSlot])
+    drawScene(canvas, multsRef.current, g, [], litSlotsRef.current, performance.now())
+  }, [rows, risk])
 
-  // ── Cancel RAF on unmount ─────────────────────────────────────────────────
-  useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current) }, [])
-
-  // ── Drop ──────────────────────────────────────────────────────────────────
-  const drop = useCallback(async () => {
-    if (phase === 'dropping' || balance === null || bet < 1 || bet > balance) return
-
-    setPhase('dropping')
-    setResult(null)
-    setLitSlot(null)
-    trailRef.current = []
-
-    const g      = makeGeom(rows)
-    const mults  = MULT_TABLE[rows][risk]
-    const dpr    = window.devicePixelRatio || 1
-    const canvas = canvasRef.current
-    if (!canvas) return
-
-    canvas.width        = Math.round(CW * dpr)
-    canvas.height       = Math.round(g.CH * dpr)
-    canvas.style.width  = `${CW}px`
-    canvas.style.height = `${g.CH}px`
-
-    // Decide the path
-    const decisions = Array.from({ length: rows }, () => +(Math.random() < 0.5))
-    const { pts, slot } = buildPath(rows, decisions, g)
-    const mult      = mults[slot]
-    const payout    = Math.floor(bet * mult)
-    const winAmount = payout - bet
-
-    // Build bezier arc segments.
-    // cp at (p1.x, p0.y) creates realistic peg-bounce physics:
-    //   x component → ease-out (ball shoots sideways fast then decelerates)
-    //   y component → simplifies to (1-t²)·p0y + t²·p1y = natural gravity ease-in
-    const segs = pts.slice(0, -1).map((p0, i) => {
-      const p1 = pts[i + 1]
-      return {
-        p0,
-        p1,
-        cp: { x: p1.x, y: p0.y },
-      }
-    })
-
-    // Speed: slightly faster per-segment on more rows (momentum builds up)
-    const MS_PER_SEG = rows <= 8 ? 260 : rows <= 12 ? 230 : 200
-
-    let segIdx   = 0
-    let segStart = null
+  // ── RAF loop ──────────────────────────────────────────────────────────────
+  const startLoop = useCallback(() => {
+    if (rafRef.current) return  // already running
 
     function frame(ts) {
-      if (segStart === null) segStart = ts
+      const canvas = canvasRef.current
+      if (!canvas) { rafRef.current = null; return }
 
-      const rawT = Math.min(1, (ts - segStart) / MS_PER_SEG)
-      const et   = rawT * rawT   // ease-in = gravity effect
+      const balls    = ballsRef.current
+      const g        = geomRef.current
+      const mults    = multsRef.current
+      const finished = []
 
-      const { p0, cp, p1 } = segs[segIdx]
-      const { x: bx, y: by } = qBez(et, p0, cp, p1)
+      balls.forEach(ball => {
+        if (ball.done) return
+        if (ball.segStart === null) ball.segStart = ts
 
-      // Update trail (keep last 5 positions)
-      trailRef.current.push({ x: bx, y: by })
-      if (trailRef.current.length > 5) trailRef.current.shift()
+        const rawT = Math.min(1, (ts - ball.segStart) / ball.msPerSeg)
+        const et   = rawT * rawT   // ease-in = gravity
 
-      drawScene(canvas, mults, g, bx, by, null, trailRef.current)
+        const { p0, cp, p1 } = ball.segs[ball.segIdx]
+        const pos = qBez(et, p0, cp, p1)
+        ball.x = pos.x
+        ball.y = pos.y
 
-      if (rawT >= 1) {
-        segIdx++
-        segStart = null
-        if (segIdx >= segs.length) {
-          // Animation finished → light the slot, settle the bet
-          drawScene(canvas, mults, g, null, null, slot)
-          setLitSlot(slot)
-          placeBet('plinko', bet, winAmount).then(() => {
-            setResult({ slot, mult, winAmount })
-            setPhase('done')
-          })
-          return
+        ball.trail.push({ x: pos.x, y: pos.y })
+        if (ball.trail.length > 5) ball.trail.shift()
+
+        if (rawT >= 1) {
+          ball.segIdx++
+          ball.segStart = null
+          if (ball.segIdx >= ball.segs.length) {
+            ball.done = true
+            ball.x    = null
+            // Merge new flash into litSlots (spread preserves earlier unrelated flashes)
+            litSlotsRef.current = { ...litSlotsRef.current, [ball.slot]: ts }
+            finished.push(ball)
+          }
         }
+      })
+
+      // Remove landed balls and settle bets
+      if (finished.length > 0) {
+        ballsRef.current = ballsRef.current.filter(b => !b.done)
+        loopUntilRef.current = ts + FLASH_MS  // extend loop to show slot fade
+
+        finished.forEach(ball => {
+          inFlightRef.current = Math.max(0, inFlightRef.current - ball.bet)
+          placeBet('plinko', ball.bet, ball.winAmount).then(() => {
+            setRecentResults(prev => {
+              const next = [{ mult: ball.mult, winAmount: ball.winAmount }, ...prev]
+              return next.slice(0, 10)
+            })
+          })
+        })
+
+        if (ballsRef.current.length === 0) setBallsActive(false)
       }
 
-      rafRef.current = requestAnimationFrame(frame)
+      drawScene(canvas, mults, g, ballsRef.current, litSlotsRef.current, ts)
+
+      if (ballsRef.current.length > 0 || ts < loopUntilRef.current) {
+        rafRef.current = requestAnimationFrame(frame)
+      } else {
+        rafRef.current = null
+      }
     }
 
     rafRef.current = requestAnimationFrame(frame)
-  }, [phase, balance, bet, rows, risk, placeBet])
+  }, [placeBet])
 
-  // ── Reset ─────────────────────────────────────────────────────────────────
-  function handleReset() {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current)
-    setPhase('idle')
-    setResult(null)
-    setLitSlot(null)
-  }
+  // ── Drop one ball ─────────────────────────────────────────────────────────
+  const drop = useCallback(() => {
+    const bal  = balanceRef.current
+    const b    = betRef.current
+    const r    = rowsRef.current
+    const risk = riskRef.current
 
-  const isDropping = phase === 'dropping'
+    // Guard: don't over-bet (account for coins already in-flight)
+    const available = (bal ?? 0) - inFlightRef.current
+    if (bal === null || b < 1 || b > available) return
+
+    const g     = makeGeom(r)
+    const mults = MULT_TABLE[r][risk]
+
+    const decisions     = Array.from({ length: r }, () => +(Math.random() < 0.5))
+    const { pts, slot } = buildPath(r, decisions, g)
+    const mult          = mults[slot]
+    const payout        = Math.floor(b * mult)
+    const winAmount     = payout - b
+    const msPerSeg      = r <= 8 ? 260 : r <= 12 ? 230 : 200
+
+    const segs = pts.slice(0, -1).map((p0, i) => {
+      const p1 = pts[i + 1]
+      return { p0, p1, cp: { x: p1.x, y: p0.y } }
+    })
+
+    const id    = ballIdRef.current++
+    const color = BALL_COLORS[id % BALL_COLORS.length]
+
+    inFlightRef.current += b
+
+    ballsRef.current.push({
+      id, segs, slot, mult, winAmount, bet: b, color, msPerSeg,
+      segIdx: 0, segStart: null,
+      x: null, y: null,
+      trail: [], done: false,
+    })
+
+    // Size canvas on first ball of a new run (rows may have changed)
+    if (ballsRef.current.length === 1) {
+      const canvas = canvasRef.current
+      if (canvas) {
+        const dpr = window.devicePixelRatio || 1
+        canvas.width        = Math.round(CW * dpr)
+        canvas.height       = Math.round(g.CH * dpr)
+        canvas.style.width  = `${CW}px`
+        canvas.style.height = `${g.CH}px`
+      }
+      geomRef.current  = g
+      multsRef.current = mults
+    }
+
+    setBallsActive(true)
+    startLoop()
+  }, [startLoop])
+
+  // ── Auto bet toggle ───────────────────────────────────────────────────────
+  const toggleAuto = useCallback(() => {
+    if (autoActive) {
+      clearInterval(autoRef.current)
+      autoRef.current = null
+      setAutoActive(false)
+    } else {
+      drop()
+      autoRef.current = setInterval(() => {
+        const bal       = balanceRef.current
+        const b         = betRef.current
+        const available = (bal ?? 0) - inFlightRef.current
+        if (bal === null || b > available) {
+          clearInterval(autoRef.current)
+          autoRef.current = null
+          setAutoActive(false)
+          return
+        }
+        drop()
+      }, 600)
+      setAutoActive(true)
+    }
+  }, [autoActive, drop])
+
+  // Stop auto when effective balance is exhausted
+  useEffect(() => {
+    if (autoActive && balance !== null && balance - inFlightRef.current < bet) {
+      clearInterval(autoRef.current)
+      autoRef.current = null
+      setAutoActive(false)
+    }
+  }, [balance, bet, autoActive])
+
+  // Cleanup RAF + interval on unmount
+  useEffect(() => () => {
+    if (rafRef.current)  cancelAnimationFrame(rafRef.current)
+    if (autoRef.current) clearInterval(autoRef.current)
+  }, [])
+
+  const canDrop = balance !== null && bet >= 1 && balance >= bet
 
   return (
-    <GameLayout title="Plinko">
-      <div className="flex flex-col items-center gap-5">
+    <GameLayout title="Plinko" wide>
+      <div className="flex flex-col lg:flex-row gap-5 items-start">
 
-        {/* ── Canvas board ── */}
-        <div className="w-full flex justify-center overflow-x-auto">
-          <canvas
-            ref={canvasRef}
-            style={{ borderRadius: 16, display: 'block', maxWidth: '100%' }}
-          />
-        </div>
+        {/* ── Left controls panel ── */}
+        <div className="w-full lg:w-72 flex-shrink-0 space-y-4">
 
-        {/* ── Risk + Rows selectors ── */}
-        <div className="w-full max-w-sm bg-cp-card border border-cp-border rounded-2xl p-4 space-y-4">
+          {/* Bet chips */}
+          <div className="bg-cp-card border border-cp-border rounded-2xl p-4">
+            <BetChips bet={bet} onBet={setBet} balance={balance ?? 0} />
+          </div>
 
-          {/* Risk */}
-          <div>
-            <label className="block text-xs font-semibold text-cp-muted uppercase tracking-wider mb-2">
-              Risk
-            </label>
+          {/* Risk selector */}
+          <div className="bg-cp-card border border-cp-border rounded-2xl p-4">
+            <label className="block text-xs font-semibold text-cp-muted uppercase tracking-wider mb-2">Risk</label>
             <div className="grid grid-cols-3 gap-2">
               {['low', 'medium', 'high'].map(r => (
                 <button
                   key={r}
-                  onClick={() => !isDropping && setRisk(r)}
-                  disabled={isDropping}
+                  onClick={() => !ballsActive && setRisk(r)}
+                  disabled={ballsActive}
                   className={`py-2 rounded-xl text-sm font-semibold border capitalize transition-all
                     ${risk === r
                       ? 'bg-amber-400 border-amber-400 text-black'
                       : 'bg-cp-elevated border-cp-border text-cp-muted hover:border-amber-400/40 hover:text-cp-text'
                     }
-                    ${isDropping ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}
-                  `}
+                    ${ballsActive ? 'opacity-40 cursor-not-allowed' : ''}`}
                 >
                   {r}
                 </button>
@@ -374,104 +509,89 @@ export default function PlinkoGame() {
             </div>
           </div>
 
-          {/* Rows */}
-          <div>
-            <label className="block text-xs font-semibold text-cp-muted uppercase tracking-wider mb-2">
-              Rows
-            </label>
+          {/* Row selector */}
+          <div className="bg-cp-card border border-cp-border rounded-2xl p-4">
+            <label className="block text-xs font-semibold text-cp-muted uppercase tracking-wider mb-2">Rows</label>
             <div className="grid grid-cols-3 gap-2">
               {[8, 12, 16].map(r => (
                 <button
                   key={r}
-                  onClick={() => !isDropping && setRows(r)}
-                  disabled={isDropping}
+                  onClick={() => !ballsActive && setRows(r)}
+                  disabled={ballsActive}
                   className={`py-2 rounded-xl text-sm font-semibold border transition-all
                     ${rows === r
                       ? 'bg-amber-400 border-amber-400 text-black'
                       : 'bg-cp-elevated border-cp-border text-cp-muted hover:border-amber-400/40 hover:text-cp-text'
                     }
-                    ${isDropping ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}
-                  `}
+                    ${ballsActive ? 'opacity-40 cursor-not-allowed' : ''}`}
                 >
                   {r}
                 </button>
               ))}
             </div>
           </div>
-        </div>
 
-        {/* ── Result banner ── */}
-        {result && (
-          <div
-            className={`w-full max-w-sm rounded-2xl border px-5 py-4 text-center
-              ${result.winAmount > 0
-                ? 'bg-emerald-400/10 border-emerald-400/25'
-                : result.winAmount === 0
-                  ? 'bg-blue-400/10 border-blue-400/25'
-                  : 'bg-red-400/10 border-red-400/25'
-              }`}
-            style={{ animation: 'fadeInPlinko 0.3s ease forwards' }}
-          >
-            <p
-              className="text-2xl font-extrabold mb-1"
-              style={{ color: slotColor(result.mult).bg }}
-            >
-              {result.mult >= 1000 ? `${Math.round(result.mult / 1000)}K×` : `${result.mult}×`}
-            </p>
-            <p className={`text-lg font-bold ${
-              result.winAmount > 0 ? 'text-emerald-400'
-              : result.winAmount === 0 ? 'text-blue-400'
-              : 'text-red-400'
-            }`}>
-              {result.winAmount > 0
-                ? `+${formatCoins(result.winAmount)} coins 🎉`
-                : result.winAmount === 0
-                  ? 'Push — bet returned'
-                  : `-${formatCoins(Math.abs(result.winAmount))} coins`
-              }
-            </p>
-            <style>{`
-              @keyframes fadeInPlinko {
-                from { opacity: 0; transform: translateY(8px); }
-                to   { opacity: 1; transform: translateY(0); }
-              }
-            `}</style>
-          </div>
-        )}
-
-        {/* ── Bet controls ── */}
-        <div className="w-full max-w-sm bg-cp-card border border-cp-border rounded-2xl p-4">
-          <BetChips
-            bet={bet}
-            onBet={setBet}
-            balance={balance ?? 0}
-            disabled={isDropping}
-          />
-        </div>
-
-        {/* ── Action button ── */}
-        {phase !== 'done' ? (
+          {/* Drop Ball */}
           <button
             onClick={drop}
-            disabled={isDropping || !bet || (balance ?? 0) < bet}
-            className={`w-full max-w-sm py-3.5 rounded-2xl font-bold text-base tracking-wide transition-all
-              ${isDropping || !bet || (balance ?? 0) < bet
-                ? 'bg-cp-elevated text-cp-muted cursor-not-allowed opacity-50'
-                : 'bg-amber-400 hover:bg-amber-300 text-black shadow-[0_0_24px_rgba(251,191,36,0.3)] active:scale-95'
-              }
-            `}
+            disabled={!canDrop}
+            className={`w-full py-3.5 rounded-2xl font-bold text-base tracking-wide transition-all
+              ${canDrop
+                ? 'bg-amber-400 hover:bg-amber-300 text-black shadow-[0_0_24px_rgba(251,191,36,0.3)] active:scale-95'
+                : 'bg-cp-elevated text-cp-muted cursor-not-allowed opacity-50'
+              }`}
           >
-            {isDropping ? 'Dropping…' : '⬇  Drop Ball'}
+            ⬇  Drop Ball
           </button>
-        ) : (
-          <button
-            onClick={handleReset}
-            className="w-full max-w-sm py-3.5 rounded-2xl font-bold text-base tracking-wide bg-cp-elevated border border-cp-border text-cp-text hover:bg-cp-card hover:border-amber-400/40 transition-all active:scale-95"
-          >
-            Drop Again
-          </button>
-        )}
 
+          {/* Auto Bet */}
+          <button
+            onClick={toggleAuto}
+            disabled={!canDrop && !autoActive}
+            className={`w-full py-3 rounded-2xl font-semibold text-sm border transition-all active:scale-95
+              ${autoActive
+                ? 'bg-red-500/20 border-red-500/40 text-red-400 hover:bg-red-500/30'
+                : canDrop
+                  ? 'bg-cp-elevated border-cp-border text-cp-muted hover:border-amber-400/40 hover:text-cp-text'
+                  : 'bg-cp-elevated border-cp-border text-cp-muted opacity-50 cursor-not-allowed'
+              }`}
+          >
+            {autoActive ? '⏹  Stop Auto' : '▶  Auto Bet'}
+          </button>
+
+        </div>
+
+        {/* ── Right: canvas + recent results ── */}
+        <div className="flex-1 min-w-0 flex flex-col gap-3">
+
+          <div className="overflow-x-auto">
+            <canvas
+              ref={canvasRef}
+              style={{ borderRadius: 16, display: 'block' }}
+            />
+          </div>
+
+          {/* Recent results pills */}
+          {recentResults.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {recentResults.map((r, i) => (
+                <span
+                  key={i}
+                  className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold border
+                    ${r.winAmount > 0
+                      ? 'bg-emerald-400/15 border-emerald-400/30 text-emerald-400'
+                      : r.winAmount === 0
+                        ? 'bg-blue-400/15 border-blue-400/30 text-blue-400'
+                        : 'bg-red-400/15 border-red-400/30 text-red-400'
+                    }`}
+                >
+                  {r.mult >= 1000 ? `${Math.round(r.mult / 1000)}K×` : `${r.mult}×`}
+                </span>
+              ))}
+            </div>
+          )}
+
+        </div>
       </div>
     </GameLayout>
   )

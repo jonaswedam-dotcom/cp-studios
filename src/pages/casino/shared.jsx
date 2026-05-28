@@ -30,7 +30,7 @@ function DailyBonusToast({ amount }) {
 }
 
 // ── GameLayout ────────────────────────────────────────────────────────────────
-export function GameLayout({ title, children }) {
+export function GameLayout({ title, children, wide }) {
   const navigate = useNavigate()
   const { balance, dailyBonusAmount } = useCasino()
 
@@ -38,7 +38,7 @@ export function GameLayout({ title, children }) {
     <div className="min-h-screen bg-cp-bg">
       <DailyBonusToast amount={dailyBonusAmount} />
 
-      <div className="max-w-2xl mx-auto px-4 py-8">
+      <div className={`${wide ? 'max-w-5xl' : 'max-w-2xl'} mx-auto px-4 py-8`}>
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-3">
