@@ -30,37 +30,11 @@ const BALL_COLORS = [
 const CW       = 480
 const FLASH_MS = 800
 
-// ─── Color helpers ────────────────────────────────────────────────────────────
-function hexToRGB(hex) {
-  const h = parseInt(hex.slice(1), 16)
-  return [(h >> 16) & 0xff, (h >> 8) & 0xff, h & 0xff]
-}
-
-function lerpRGB(a, b, t) {
-  return [
-    Math.round(a[0] + (b[0] - a[0]) * t),
-    Math.round(a[1] + (b[1] - a[1]) * t),
-    Math.round(a[2] + (b[2] - a[2]) * t),
-  ]
-}
-
-// Returns 'rgb(r,g,b)' for slot i out of total slots
-// center (t=0) → teal, edge (t=1) → red
-function slotGradientColor(i, total) {
-  const t = Math.abs((i - (total - 1) / 2) / Math.max(1, (total - 1) / 2))
-  const stops = [
-    [0,    hexToRGB('#10b981')],
-    [0.33, hexToRGB('#eab308')],
-    [0.66, hexToRGB('#f97316')],
-    [1.0,  hexToRGB('#ef4444')],
-  ]
-  let s0 = stops[0], s1 = stops[1]
-  for (let k = 0; k < stops.length - 1; k++) {
-    if (t >= stops[k][0] && t <= stops[k + 1][0]) { s0 = stops[k]; s1 = stops[k + 1]; break }
-  }
-  const u   = s0[0] === s1[0] ? 0 : (t - s0[0]) / (s1[0] - s0[0])
-  const rgb = lerpRGB(s0[1], s1[1], u)
-  return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`
+// ─── Slot tint: green for ≥1× (profit/push), red for <1× (loss) ──────────────
+function slotTint(m) {
+  return m >= 1
+    ? [34,  197, 94]   // green-500
+    : [239, 68,  68]   // red-500
 }
 
 // ─── Board geometry ───────────────────────────────────────────────────────────
@@ -110,11 +84,12 @@ function qBez(t, p0, cp, p1) {
 }
 
 // ─── Rounded rect (Safari compat) ────────────────────────────────────────────
+// Always begins a fresh path so fill and stroke calls never share stale state.
 function rrect(ctx, x, y, w, h, r) {
+  ctx.beginPath()
   if (typeof ctx.roundRect === 'function') {
     ctx.roundRect(x, y, w, h, r)
   } else {
-    ctx.beginPath()
     ctx.moveTo(x + r, y)
     ctx.arcTo(x + w, y,     x + w, y + h, r)
     ctx.arcTo(x + w, y + h, x,     y + h, r)
@@ -154,7 +129,7 @@ function drawScene(canvas, mults, geom, balls, litSlots, now) {
 
   // ── Slots ──
   mults.forEach((m, i) => {
-    const color    = slotGradientColor(i, SLOTS)
+    const [tR, tG, tB] = slotTint(m)
     const x        = i * SLOT_W + 2
     const y        = SLOT_Y
     const w        = SLOT_W - 4
@@ -165,35 +140,41 @@ function drawScene(canvas, mults, geom, balls, litSlots, now) {
     const ff       = lit ? Math.max(0, 1 - flashAge / FLASH_MS) : 0
 
     ctx.save()
-    if (lit) { ctx.shadowBlur = 24 * ff; ctx.shadowColor = color }
-    ctx.globalAlpha = lit ? Math.min(1, 0.6 + 0.4 * ff) : 0.5
-    ctx.fillStyle   = color
+
+    // ── Dark base ──
+    ctx.fillStyle = '#1f1f1f'
     rrect(ctx, x, y, w, h, 6)
     ctx.fill()
-    ctx.globalAlpha = 1
-    ctx.shadowBlur  = 0
 
-    if (lit && ff > 0.05) {
-      ctx.strokeStyle = color
-      ctx.lineWidth   = 1.5
-      ctx.globalAlpha = ff * 0.8
+    // ── Colored flash overlay (fades in on landing, fades out over FLASH_MS) ──
+    if (ff > 0) {
+      ctx.save()
+      ctx.shadowBlur  = 20 * ff
+      ctx.shadowColor = `rgba(${tR},${tG},${tB},${0.85 * ff})`
+      ctx.globalAlpha = ff * 0.38
+      ctx.fillStyle   = `rgb(${tR},${tG},${tB})`
       rrect(ctx, x, y, w, h, 6)
-      ctx.stroke()
-      ctx.globalAlpha = 1
+      ctx.fill()
+      ctx.restore()
     }
 
-    const fontSize   = m >= 100 ? 9 : m >= 10 ? 10 : 11
-    ctx.globalAlpha  = lit ? 1 : 0.85
-    ctx.fillStyle    = '#fff'
+    // ── Tinted border: subtle always, bright on flash ──
+    ctx.strokeStyle = ff > 0
+      ? `rgba(${tR},${tG},${tB},${Math.min(0.9, 0.2 + 0.7 * ff)})`
+      : `rgba(${tR},${tG},${tB},0.18)`
+    ctx.lineWidth = 1
+    rrect(ctx, x, y, w, h, 6)
+    ctx.stroke()
+
+    // ── Text: white, bold, always fully opaque ──
+    const label    = m >= 1000 ? `${Math.round(m / 1000)}K×` : `${m}×`
+    const fontSize = m >= 100 ? 9 : m >= 10 ? 10 : 11
+    ctx.fillStyle    = '#ffffff'
     ctx.font         = `bold ${fontSize}px system-ui, -apple-system, sans-serif`
     ctx.textAlign    = 'center'
     ctx.textBaseline = 'middle'
-    ctx.fillText(
-      m >= 1000 ? `${Math.round(m / 1000)}K×` : `${m}×`,
-      x + w / 2,
-      y + h / 2,
-    )
-    ctx.globalAlpha = 1
+    ctx.fillText(label, x + w / 2, y + h / 2)
+
     ctx.restore()
   })
 
