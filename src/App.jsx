@@ -18,6 +18,7 @@ import AviatorGame from './pages/casino/AviatorGame'
 import ChickenRoadGame from './pages/casino/ChickenRoadGame'
 import MinesGame from './pages/casino/MinesGame'
 import PlinkoGame from './pages/casino/PlinkoGame'
+import WarPage from './pages/WarPage'
 
 function WithNav({ children }) {
   const { chatOpen } = useApp()
@@ -132,6 +133,12 @@ function AppRoutes() {
       <Route path="/casino/plinko" element={
         <ProtectedRoute>
           <WithNav><PlinkoGame /></WithNav>
+        </ProtectedRoute>
+      } />
+
+      <Route path="/war" element={
+        <ProtectedRoute>
+          <WithNav><WarPage /></WithNav>
         </ProtectedRoute>
       } />
 

@@ -47,6 +47,17 @@ function DiceIcon() {
   )
 }
 
+function SwordIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+      <polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/>
+      <line x1="13" y1="19" x2="19" y2="13"/>
+      <line x1="16" y1="16" x2="20" y2="20"/>
+      <line x1="19" y1="21" x2="21" y2="19"/>
+    </svg>
+  )
+}
+
 function CheckSmallIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
@@ -311,6 +322,7 @@ export default function Navbar() {
               { to: '/',        label: 'Home',   icon: null                          },
               { to: '/create',  label: 'Upload', icon: null                          },
               { to: '/casino',  label: 'Casino', icon: <DiceIcon />                  },
+              { to: '/war',     label: 'War',    icon: <SwordIcon />                 },
               ...(currentUser.isAdmin
                 ? [{ to: '/admin', label: 'Admin', badge: hasNewRequests, icon: null }]
                 : []),
@@ -322,8 +334,12 @@ export default function Navbar() {
                 className={({ isActive }) =>
                   `text-sm font-medium transition-colors duration-150 flex items-center gap-1.5 ${
                     isActive
-                      ? to === '/casino' ? 'text-amber-400' : 'text-cp-text'
-                      : to === '/casino' ? 'text-amber-400/60 hover:text-amber-400' : 'text-cp-muted hover:text-cp-text'
+                      ? to === '/casino' ? 'text-amber-400'
+                        : to === '/war'  ? 'text-red-400'
+                        : 'text-cp-text'
+                      : to === '/casino' ? 'text-amber-400/60 hover:text-amber-400'
+                        : to === '/war'  ? 'text-red-400/60 hover:text-red-400'
+                        : 'text-cp-muted hover:text-cp-text'
                   }`
                 }
               >
