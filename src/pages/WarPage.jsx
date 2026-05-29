@@ -1,7 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { useApp } from '../context/AppContext'
 import { useCasino } from '../context/CasinoContext'
+
+// ─── Set to false to re-enable the live game ─────────────────────────────────
+const COMING_SOON = true
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const GRID_COLS      = 31   // q range 0..30
@@ -227,8 +231,47 @@ function MoveTroopsModal({ fromTile, toTile, isAttack, onConfirm, onClose, loadi
   )
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
+// ─── Coming Soon placeholder ──────────────────────────────────────────────────
+function WarComingSoon() {
+  const navigate = useNavigate()
+  return (
+    <div className="min-h-[calc(100vh-64px)] bg-cp-bg flex items-center justify-center p-6">
+      <div className="flex flex-col items-center text-center max-w-sm gap-6">
+        <div className="w-20 h-20 rounded-3xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-9 h-9 text-red-400/70">
+            <polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5" />
+            <line x1="13" y1="19" x2="19" y2="13" />
+            <line x1="16" y1="16" x2="20" y2="20" />
+            <line x1="19" y1="21" x2="21" y2="19" />
+          </svg>
+        </div>
+        <div className="space-y-2">
+          <h1 className="font-display text-2xl text-cp-text font-normal">CP War — Coming Soon</h1>
+          <p className="text-cp-muted text-sm leading-relaxed">
+            We are working on improvements to CP War. Check back soon!
+          </p>
+        </div>
+        <button
+          onClick={() => navigate('/')}
+          className="px-6 py-2.5 rounded-xl border border-cp-border text-cp-muted text-sm font-medium hover:text-cp-text hover:border-cp-border-soft transition-all duration-150"
+        >
+          Back to Home
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Route entry point ────────────────────────────────────────────────────────
+// Flip COMING_SOON above to re-enable the live game.
+// WarGame is a separate component so hooks are never conditionally skipped.
 export default function WarPage() {
+  if (COMING_SOON) return <WarComingSoon />
+  return <WarGame />
+}
+
+// ─── Live game ────────────────────────────────────────────────────────────────
+function WarGame() {
   const { session } = useApp()
   const { balance, placeBet } = useCasino()
   const userId   = session?.user?.id

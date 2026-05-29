@@ -318,11 +318,16 @@ export default function Navbar() {
         {/* Nav + avatar */}
         <div className="flex items-center gap-7">
           <nav className="flex items-center gap-6">
+            {/* War — visible but unclickable (coming soon) */}
+            <span className="text-sm font-medium flex items-center gap-1.5 text-red-400/30 cursor-not-allowed select-none" title="Coming soon">
+              <SwordIcon />
+              War
+            </span>
+
             {[
               { to: '/',        label: 'Home',   icon: null                          },
               { to: '/create',  label: 'Upload', icon: null                          },
               { to: '/casino',  label: 'Casino', icon: <DiceIcon />                  },
-              { to: '/war',     label: 'War',    icon: <SwordIcon />                 },
               ...(currentUser.isAdmin
                 ? [{ to: '/admin', label: 'Admin', badge: hasNewRequests, icon: null }]
                 : []),
@@ -334,11 +339,8 @@ export default function Navbar() {
                 className={({ isActive }) =>
                   `text-sm font-medium transition-colors duration-150 flex items-center gap-1.5 ${
                     isActive
-                      ? to === '/casino' ? 'text-amber-400'
-                        : to === '/war'  ? 'text-red-400'
-                        : 'text-cp-text'
+                      ? to === '/casino' ? 'text-amber-400' : 'text-cp-text'
                       : to === '/casino' ? 'text-amber-400/60 hover:text-amber-400'
-                        : to === '/war'  ? 'text-red-400/60 hover:text-red-400'
                         : 'text-cp-muted hover:text-cp-text'
                   }`
                 }
