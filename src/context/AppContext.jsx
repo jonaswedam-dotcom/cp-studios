@@ -94,11 +94,20 @@ export function AppProvider({ children }) {
 
     // Admin bypasses the pending-approval gate
     if (data.user.email !== ADMIN_EMAIL) {
-      const { data: pu } = await supabase
+      const { data: pu, error: puErr } = await supabase
         .from('pending_users')
         .select('status')
         .eq('user_id', data.user.id)
-        .single()
+        .maybeSingle()
+
+      // Don't treat a transient query failure as "pending" — that would
+      // silently sign out a legitimately approved user. Fail explicitly.
+      if (puErr) {
+        await supabase.auth.signOut()
+        const e = new Error('Could not verify your account status. Please try again.')
+        e.code  = 'STATUS_CHECK_FAILED'
+        throw e
+      }
 
       if (!pu || pu.status === 'pending') {
         await supabase.auth.signOut()
