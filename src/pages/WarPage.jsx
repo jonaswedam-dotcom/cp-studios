@@ -11,8 +11,10 @@ import MoveUnitsModal from '../war/MoveUnitsModal.jsx'
 import BuildingsModal from '../war/BuildingsModal.jsx'
 import { UNITS, UNIT_TYPES, START_ARMY } from '../war/units.js'
 import { troopCost } from '../war/economy.js'
-import { resolveCombat, emptyStack, stackFromRow } from '../war/combat.js'
+import { stackStrength, stackTotal, resolveCombat, emptyStack, stackFromRow } from '../war/combat.js'
 import { costMultiplier, defenseMultiplier, antiAirFactor, strengthMultiplier, buildingCost, SLOTS_PER_REGION } from '../war/buildings.js'
+import { neutralGarrison } from '../war/neutral.js'
+import { lootFraction, lootCoins } from '../war/spoils.js'
 import { landNeighbors, airReachable, seaReachable } from '../war/geo.js'
 import { pickRandomSpawn } from '../war/spawn.js'
 
@@ -181,24 +183,45 @@ function WarGame() {
       const incoming = { ...emptyStack(), [mv.unit_type]: mv.count }
 
       if (!dest || !dest.owner_id) {
-        await supabase.from('war_regions').upsert({
-          region_id: mv.to_region, country_code: graph?.regions[mv.to_region]?.country || null,
-          owner_id: mv.player_id, owner_name: player?.display_name || 'Player', color: player?.color || '#888',
-          is_hq: false, ...emptyStack(), [mv.unit_type]: mv.count, updated_at: new Date().toISOString(),
-        }, { onConflict: 'region_id' })
+        // Unclaimed: must beat the neutral garrison to take it.
+        const garrison = neutralGarrison(mv.to_region)
+        const r = resolveCombat(incoming, garrison, {
+          attackMult: strengthMultiplier(buildings.filter((b) => b.owner_id === mv.player_id)),
+        })
+        if (r.winner === 'attacker') {
+          await supabase.from('war_regions').upsert({
+            region_id: mv.to_region, country_code: graph?.regions[mv.to_region]?.country || null,
+            owner_id: mv.player_id, owner_name: player?.display_name || 'Player', color: player?.color || '#888',
+            is_hq: false, ...r.survivors, updated_at: new Date().toISOString(),
+          }, { onConflict: 'region_id' })
+        }
+        // If the attack failed, the units are simply lost (garrison held).
       } else if (dest.owner_id === mv.player_id) {
         await supabase.from('war_regions')
           .update({ [mv.unit_type]: (dest[mv.unit_type] || 0) + mv.count, updated_at: new Date().toISOString() })
           .eq('region_id', mv.to_region)
       } else {
+        // Enemy province.
         const defBuildings = buildings.filter((b) => b.region_id === mv.to_region)
         const defense = stackFromRow(dest)
+        const defStrength = stackStrength(defense) * defenseMultiplier(defBuildings)
         const r = resolveCombat(incoming, defense, {
           attackMult: strengthMultiplier(buildings.filter((b) => b.owner_id === mv.player_id)),
           defenseMult: defenseMultiplier(defBuildings),
           antiAir: antiAirFactor(defBuildings),
         })
         if (r.winner === 'attacker') {
+          // Spoils: loot coins (credited only on the attacker's own client) + downgrade captured buildings.
+          if (mv.player_id === userId) {
+            const frac = lootFraction(stackTotal(defense), stackTotal(defense)) // full kill on capture
+            const loot = lootCoins(frac, defStrength)
+            if (loot > 0) { await adjustBalance(loot); showFlash(`Conquered + looted ${loot.toLocaleString()} coins`) }
+          }
+          // Downgrade/transfer the captured province's buildings (loser keeps a remnant of value).
+          for (const b of defBuildings) {
+            if (b.level <= 1) await supabase.from('war_buildings').delete().eq('id', b.id)
+            else await supabase.from('war_buildings').update({ level: b.level - 1, owner_id: mv.player_id }).eq('id', b.id)
+          }
           await supabase.from('war_regions').update({
             owner_id: mv.player_id, owner_name: player?.display_name || 'Player', color: player?.color || '#888',
             is_hq: false, ...r.survivors, updated_at: new Date().toISOString(),
@@ -210,7 +233,7 @@ function WarGame() {
         }
       }
     }
-  }, [movements, regions, players, graph, buildings])
+  }, [movements, regions, players, graph, buildings, userId, adjustBalance])
 
   useEffect(() => {
     const id = setInterval(resolveMovements, 4000)
