@@ -35,7 +35,7 @@
 - `src/war/spawn.js` (+ `spawn.test.js`) — random spawn province picker.
 - `scripts/build-war-geo.mjs` — build-time script that generates the province graph + polygon GeoJSON.
 - `public/war/provinces.json` — generated province graph (committed).
-- `public/war/provinces.geojson` — generated polygon source for MapLibre (committed).
+- `public/war/provinces.topojson` — generated polygon source (compact TopoJSON; the client converts it to GeoJSON via `topojson-client` `feature()`) (committed).
 
 **Created — React/MapLibre layer (thin):**
 - `src/war/icons.jsx` — inline-SVG unit/HQ icon set + marker-element builders.
@@ -104,6 +104,8 @@ git commit -m "build(war): add maplibre-gl + topojson build deps"
 ---
 
 ## Task 2: Generate the province graph + polygon asset
+
+> **IMPLEMENTED DIFFERENTLY (and committed) — this section is superseded; see `scripts/build-war-geo.mjs` for the source of truth.** The 50m dataset turned out to be too coarse (294 regions), so the build now uses Natural Earth **10m** admin-1 (~4,596 provinces), runs `topojson-server` → `topojson-simplify` (presimplify + simplify) → `topojson-client` `quantize`, and ships a compact **`public/war/provinces.topojson`** (~4.2MB raw / ~0.7MB gzipped) that the client converts to GeoJSON with `topojson-client`'s `feature()`. It still writes `public/war/provinces.json` (the `{name, city, country, centroid, neighbors}` graph). Requires the extra dev dep `topojson-simplify`, and `topojson-client` is a **runtime** dependency (used in the browser by Task 12). The `provinces.geojson` file is NOT produced. The original 50m GeoJSON approach below is retained only for historical context.
 
 This script downloads Natural Earth admin-1 provinces (50m) + populated places, computes land adjacency (via TopoJSON shared arcs), a centroid per province, and a representative city per province, then writes two files into `public/war/`.
 
@@ -906,6 +908,7 @@ Renders the basemap + province fills (tinted by feature-state for owned regions)
 import { useEffect, useRef } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import { feature } from 'topojson-client'
 import { markerEl } from './icons.jsx'
 import { UNIT_TYPES } from './units.js'
 
@@ -954,8 +957,9 @@ export default function MapView({ graph, regions, movements, onRegionClick }) {
     mapRef.current = map
 
     map.on('load', async () => {
-      const res = await fetch('/war/provinces.geojson')
-      const gj = await res.json()
+      const res = await fetch('/war/provinces.topojson')
+      const topo = await res.json()
+      const gj = feature(topo, topo.objects.p) // TopoJSON -> GeoJSON FeatureCollection
       map.addSource('provinces', { type: 'geojson', data: gj, promoteId: 'adm1_code' })
       map.addLayer({
         id: 'province-fills', type: 'fill', source: 'provinces',

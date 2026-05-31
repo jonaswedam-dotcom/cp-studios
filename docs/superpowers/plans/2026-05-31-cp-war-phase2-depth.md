@@ -22,7 +22,7 @@ This plan builds directly on `docs/superpowers/plans/2026-05-31-cp-war-phase1-co
 - **`src/war/icons.jsx`** — `UNIT_SVG`, `UnitIcon`, `markerEl({type,color,count,hq})`.
 - **`src/war/useWarData.js`** — `useWarData(userId) -> {graph, regions, players, movements, loading, setRegions, loadAll}`.
 - **`src/war/MapView.jsx`**, **`BuyUnitsModal.jsx`**, **`MoveUnitsModal.jsx`**, **`Sidebar.jsx`**, **`src/pages/WarPage.jsx`** (orchestrator with `handleBuy`, `handleMove`, `resolveMovements`, `onRegionClick`).
-- **`scripts/build-war-geo.mjs`** → `public/war/provinces.json` (`{regions:{[adm1_code]:{name,city,country,centroid,neighbors}}}`) + `public/war/provinces.geojson`.
+- **`scripts/build-war-geo.mjs`** → `public/war/provinces.json` (`{regions:{[adm1_code]:{name,city,country,centroid,neighbors}}}`) + `public/war/provinces.topojson`. **NOTE (changed during Phase 1):** the asset is now Natural Earth **10m** admin-1 (~4,596 provinces) shipped as compact **TopoJSON** (converted to GeoJSON client-side via `topojson-client`); there is no `provinces.geojson`. The build pipeline is `topology()` (unquantized) → `presimplify`+`simplify` (`topojson-simplify`) → `quantize` (`topojson-client`). When this phase adds a `coastal` flag, compute the arc-usage counts on the **unquantized** topology (right after `topology()`/`neighbors`, before simplify/quantize), and add `coastal` to each `regions[code]` entry.
 - **DB tables** `war_players`, `war_regions` (cols `soldier`/`tank`/`jet`, `is_hq`, …), `war_movements`. Migrations up to `019`.
 - **`src/context/CasinoContext.jsx`** exposes `adjustBalance(delta)`.
 
