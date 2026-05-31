@@ -308,7 +308,8 @@ function WarGame() {
       </div>
 
       <Sidebar me={me} myRegions={myRegionRows.length} myUnits={myUnits} balance={balance}
-        leaderboard={leaderboard} onBuy={() => setShowBuy(true)} eliminated={eliminated} />
+        leaderboard={leaderboard} onBuy={() => setShowBuy(true)} eliminated={eliminated}
+        bonuses={{ costMult: myCostMult, strengthMult: myStrengthMult }} />
     </div>
   )
 }

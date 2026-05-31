@@ -1,4 +1,7 @@
-export default function Sidebar({ me, myRegions, myUnits, balance, leaderboard, onBuy, eliminated }) {
+export default function Sidebar({ me, myRegions, myUnits, balance, leaderboard, onBuy, eliminated, bonuses }) {
+  const costBonus = bonuses ? Math.round((1 - bonuses.costMult) * 100) : 0
+  const strengthBonus = bonuses ? Math.round((bonuses.strengthMult - 1) * 100) : 0
+  const hasBonuses = costBonus > 0 || strengthBonus > 0
   return (
     <aside className="w-full lg:w-72 flex-shrink-0 bg-cp-card border-t lg:border-t-0 lg:border-l border-cp-border overflow-y-auto">
       <div className="p-4 space-y-4">
@@ -18,6 +21,12 @@ export default function Sidebar({ me, myRegions, myUnits, balance, leaderboard, 
               <div className="bg-cp-card rounded-xl p-2.5"><p className="text-cp-muted mb-0.5">Units</p><p className="text-cp-text font-bold text-base">{myUnits.toLocaleString()}</p></div>
               <div className="bg-cp-card rounded-xl p-2.5 col-span-2"><p className="text-cp-muted mb-0.5">Coins</p><p className="text-amber-400 font-bold">{(balance ?? 0).toLocaleString()}</p></div>
             </div>
+            {hasBonuses && (
+              <div className="flex flex-wrap gap-1.5 text-[11px]">
+                {costBonus > 0 && <span className="px-2 py-1 rounded-lg bg-cp-card text-cp-muted">Troops −{costBonus}% cost</span>}
+                {strengthBonus > 0 && <span className="px-2 py-1 rounded-lg bg-cp-card text-cp-muted">+{strengthBonus}% strength</span>}
+              </div>
+            )}
             <button onClick={onBuy} className="w-full py-2.5 rounded-xl bg-red-500/15 border border-red-500/30 text-red-400 hover:bg-red-500/25 hover:border-red-500/50 text-sm font-semibold transition-all">
               Buy Units
             </button>
@@ -45,6 +54,8 @@ export default function Sidebar({ me, myRegions, myUnits, balance, leaderboard, 
             <p>🎯 Click again to choose units + a destination</p>
             <p>🪖 Soldiers/tanks move to bordering provinces</p>
             <p>✈️ Jets fly across water to nearby provinces</p>
+            <p>🚢 Warships ferry troops between coastal provinces</p>
+            <p>🏗 Click a province you own again to build/upgrade</p>
             <p>⚔️ Combat resolves when units arrive</p>
             <p>💰 Buy units with coins; expand to win</p>
           </div>

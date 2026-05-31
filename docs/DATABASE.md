@@ -11,7 +11,7 @@ policies, and the setup steps.
 > [Security limitations & known gaps](#security-limitations--known-gaps).
 
 All schema is defined in [`../supabase/migrations/`](../supabase/migrations/) as numbered SQL
-files (`001`–`019`). There is no migration runner — run them by hand in the Supabase
+files (`001`–`021`). There is no migration runner — run them by hand in the Supabase
 **SQL Editor**, in order.
 
 ---
@@ -20,13 +20,14 @@ files (`001`–`019`). There is no migration runner — run them by hand in the 
 
 1. Create a Supabase project; copy the Project URL and anon key into `.env.local`
    (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`).
-2. Run migrations `001` → `019` in order in the SQL Editor.
+2. Run migrations `001` → `021` in order in the SQL Editor.
 3. Confirm the public storage bucket `cp-studios` exists (migration `001` creates it).
 4. Enable **Realtime** on the tables that need it (some are enabled in SQL, others must be
    toggled in **Database → Replication**):
    - `messages` — enabled in migration `003`.
    - `likes`, `comments` — required for live photo reactions (commented hint in `001`).
    - `war_regions`, `war_players`, `war_movements` — required for CP War (commented hint in `019`).
+   - `war_buildings` — required for CP War buildings (commented hint in `021`).
 5. Make sure an account exists with the **admin email** (see [Admin model](#admin-model)).
 
 ---
@@ -182,6 +183,7 @@ The map. One row per province (populated lazily as players claim territory).
 | `soldier`    | integer     | default `0`; units of this type present in the province           |
 | `tank`       | integer     | default `0`                                                       |
 | `jet`        | integer     | default `0`                                                       |
+| `warship`    | integer     | default `0` (added in migration `020`)                            |
 | `updated_at` | timestamptz | default `now()`                                                   |
 
 RLS: any authenticated user can `select`, `insert`, and `update`. Write is deliberately
@@ -197,15 +199,36 @@ In-flight unit movements between provinces.
 | `player_id`   | uuid        | FK → `auth.users` (`on delete cascade`)                     |
 | `from_region` | text        | source `region_id`                                          |
 | `to_region`   | text        | destination `region_id`                                     |
-| `unit_type`   | text        | `soldier` \| `tank` \| `jet`                                |
+| `unit_type`   | text        | `soldier` \| `tank` \| `jet` \| `warship` (migration `020`) |
 | `count`       | integer     |                                                             |
-| `mode`        | text        | `land` \| `air`                                             |
+| `mode`        | text        | `land` \| `air` \| `sea` (migration `020`)                  |
 | `status`      | text        | `moving` \| `arrived` \| `cancelled` (default `moving`)     |
 | `arrives_at`  | timestamptz |                                                             |
 | `created_at`  | timestamptz | default `now()`                                             |
 
 RLS: any authenticated user can `select`; a player can `insert`/`update` only their own rows
 (`auth.uid() = player_id`). Movement resolution is polled and applied client-side.
+
+#### `war_buildings` (migration `021`)
+Structures placed on a province (max 3 slots per province). Defence buildings (`bunker`,
+`antiair`) affect only their region; economy buildings (`factory`, `lab`, `bank`) give a
+**global** bonus to the owner but sit on one province — when that province is captured they
+**transfer + downgrade** by one level (deleted at level 1) rather than being destroyed.
+
+| Column       | Type        | Notes                                                              |
+|--------------|-------------|--------------------------------------------------------------------|
+| `id`         | uuid PK     | default `gen_random_uuid()`                                        |
+| `region_id`  | text        | FK → `war_regions(region_id)` (`on delete cascade`)                |
+| `owner_id`   | uuid        | FK → `auth.users` (`on delete set null`)                           |
+| `type`       | text        | `bunker` \| `antiair` \| `factory` \| `lab` \| `bank`              |
+| `level`      | integer     | `1`–`3` (check constraint); cost rises per level                   |
+| `created_at` | timestamptz | default `now()`                                                    |
+
+Effects (mirrored in `src/war/buildings.js`): **bunker** +50%/level defender strength;
+**antiair** removes 25%/level of incoming jet strength (cap 75%); **factory** −10%/level troop
+cost (floor 40%); **lab** +10%/level troop strength; **bank** passive income (50 coins/level/hr,
+paid by the Phase 3 server tick). RLS in Phase 2: broad-authenticated write (client resolves
+capture); Phase 3 tightens to owner-only. Enable Realtime for `war_buildings`.
 
 ### Direct messages (migration `018`)
 
@@ -380,3 +403,5 @@ behaviour and would need fixing before this app could be exposed to untrusted us
 | `017_security_hardening.sql`           | RLS hardening pass (see security review)                       |
 | `018_direct_messages.sql`              | `dm_threads`, `direct_messages`, RLS, trigger, 3 RPCs, realtime|
 | `019_cp_war_v2.sql`                    | CP War v2: real-world province schema (`war_players`/`war_regions`/`war_movements`) |
+| `020_war_warship.sql`                  | CP War Phase 2: `war_regions.warship` column + `warship`/`sea` movement constraints |
+| `021_war_buildings.sql`                | CP War Phase 2: `war_buildings` table (bunker/antiair/factory/lab/bank, Lv 1–3) + RLS |
