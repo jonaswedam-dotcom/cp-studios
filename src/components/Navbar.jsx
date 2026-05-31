@@ -66,6 +66,14 @@ function CheckSmallIcon() {
   )
 }
 
+function ChatIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  )
+}
+
 // ── Helpers ────────────────────────────────────────────────
 function since24h() {
   return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
@@ -75,7 +83,7 @@ function since24h() {
 export default function Navbar() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { currentUser, logout, updateCurrentUser } = useApp()
+  const { currentUser, logout, updateCurrentUser, chatOpen, setChatOpen } = useApp()
 
   // ── Panel open state ──────────────────────────────────────
   const [isOpen,  setIsOpen]  = useState(false)
@@ -360,6 +368,17 @@ export default function Navbar() {
                 )}
               </NavLink>
             ))}
+
+            {/* Chat — toggles the group-chat panel (same panel as the right-edge tab) */}
+            <button
+              onClick={() => setChatOpen(o => !o)}
+              className={`text-sm font-medium transition-colors duration-150 flex items-center gap-1.5 ${
+                chatOpen ? 'text-cp-text' : 'text-cp-muted hover:text-cp-text'
+              }`}
+            >
+              <ChatIcon />
+              Chat
+            </button>
           </nav>
 
           {/* Avatar trigger */}

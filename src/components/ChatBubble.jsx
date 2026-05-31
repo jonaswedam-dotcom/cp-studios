@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { supabase } from '../supabase'
 import { useApp } from '../context/AppContext'
 
@@ -120,7 +120,7 @@ function DateSeparator({ label }) {
 }
 
 // ── Message bubble ─────────────────────────────────────────
-function MessageBubble({ msg, isOwn, showName }) {
+function MessageBubble({ msg, isOwn, showName, onImageLoad }) {
   return (
     <div className={`flex flex-col gap-0.5 max-w-[80%] ${isOwn ? 'items-end self-end' : 'items-start self-start'}`}>
       {showName && !isOwn && (
@@ -131,6 +131,7 @@ function MessageBubble({ msg, isOwn, showName }) {
           <img
             src={msg.image_url}
             alt="shared"
+            onLoad={onImageLoad}
             className="max-w-[220px] max-h-48 object-cover block"
           />
         </div>
@@ -155,7 +156,7 @@ function MessageBubble({ msg, isOwn, showName }) {
 function ChatPanelBody({
   messages, hasLoaded, typingNames, imagePreview,
   text, sending,
-  onTextChange, onKeyDown, onSend, onImageFile, onClearImage,
+  onTextChange, onKeyDown, onSend, onImageFile, onClearImage, onMediaLoad,
   scrollRef, textareaRef, fileRef,
   userId,
 }) {
@@ -188,6 +189,7 @@ function ChatPanelBody({
                 msg={item.msg}
                 isOwn={item.msg.user_id === userId}
                 showName={item.showName}
+                onImageLoad={onMediaLoad}
               />
             )
           )
@@ -262,7 +264,8 @@ export default function ChatBubble() {
   const [sending,      setSending]      = useState(false)
   const [typingUsers,  setTypingUsers]  = useState({})
 
-  const scrollRef     = useRef(null)
+  const desktopScrollRef = useRef(null)
+  const mobileScrollRef  = useRef(null)
   const textareaRef   = useRef(null)
   const fileRef       = useRef(null)
   const chatOpenRef   = useRef(chatOpen)
@@ -271,10 +274,13 @@ export default function ChatBubble() {
   useEffect(() => { chatOpenRef.current = chatOpen }, [chatOpen])
 
   // ── Scroll helpers ─────────────────────────────────────────
+  // The desktop sidebar and mobile popup are both always mounted; only one is
+  // visible per breakpoint. Scroll whichever is laid out — the hidden one
+  // reports scrollHeight 0, so scrolling it is a harmless no-op.
   const scrollToBottom = useCallback((behavior = 'smooth') => {
-    const el = scrollRef.current
-    if (!el) return
-    el.scrollTo({ top: el.scrollHeight, behavior })
+    for (const el of [desktopScrollRef.current, mobileScrollRef.current]) {
+      if (el && el.scrollHeight) el.scrollTo({ top: el.scrollHeight, behavior })
+    }
   }, [])
 
   // ── Initial dot check ──────────────────────────────────────
@@ -335,14 +341,22 @@ export default function ChatBubble() {
         .from('messages')
         .select('*')
         .order('created_at', { ascending: true })
-        .then(({ data }) => {
-          setMessages(data || [])
-          requestAnimationFrame(() => scrollToBottom('instant'))
-        })
-    } else {
-      requestAnimationFrame(() => scrollToBottom('instant'))
+        .then(({ data }) => setMessages(data || []))
     }
-  }, [chatOpen, userId, scrollToBottom])
+  }, [chatOpen, userId])
+
+  // ── Pin the view to the newest messages ───────────────────
+  // Runs after the DOM commits, so scrollHeight already reflects the
+  // rendered messages — fixes opening to an older scroll position.
+  useLayoutEffect(() => {
+    if (chatOpen) scrollToBottom('instant')
+  }, [messages, chatOpen, scrollToBottom])
+
+  // Images load after layout, growing the list and pushing the bottom
+  // down; re-pin as each one finishes so we stay on the newest message.
+  const handleMediaLoad = useCallback(() => {
+    if (chatOpenRef.current) scrollToBottom('instant')
+  }, [scrollToBottom])
 
   // ── Typing broadcast ───────────────────────────────────────
   const broadcastTyping = useCallback(() => {
@@ -452,7 +466,7 @@ export default function ChatBubble() {
     onSend:       handleSend,
     onImageFile:  handleImageFile,
     onClearImage: clearImage,
-    scrollRef,
+    onMediaLoad:  handleMediaLoad,
     textareaRef,
     fileRef,
     userId,
@@ -506,7 +520,7 @@ export default function ChatBubble() {
         </div>
 
         {/* Chat body */}
-        <ChatPanelBody {...panelBodyProps} />
+        <ChatPanelBody {...panelBodyProps} scrollRef={desktopScrollRef} />
       </div>
 
       {/* ════════════════════════════════════════════════════════════
@@ -542,7 +556,7 @@ export default function ChatBubble() {
             </button>
           </div>
 
-          <ChatPanelBody {...panelBodyProps} />
+          <ChatPanelBody {...panelBodyProps} scrollRef={mobileScrollRef} />
         </div>
 
         {/* Floating button */}
