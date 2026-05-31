@@ -165,6 +165,19 @@ export function CasinoProvider({ children }) {
     return newBalance
   }, [userId, balance])
 
+  // ── Adjust balance directly (used by CP War; no game_history row) ──────────
+  const adjustBalance = useCallback(async (delta) => {
+    if (!userId) throw new Error('Not authenticated')
+    const newBalance = Math.max(0, (balance ?? 0) + delta)
+    const { error } = await supabase
+      .from('wallets')
+      .update({ balance: newBalance })
+      .eq('user_id', userId)
+    if (error) { console.error('[CasinoContext] adjustBalance error:', error); return balance }
+    setBalance(newBalance)
+    return newBalance
+  }, [userId, balance])
+
   // ── Daily refill (emergency, when broke) ─────────────────────────────────
   const _refillKey = userId ? `cp-studios:casino-refill:${userId}` : null
   const _todayStr  = new Date().toISOString().slice(0, 10) // "YYYY-MM-DD"
@@ -200,6 +213,7 @@ export function CasinoProvider({ children }) {
         loading,
         loadBalance,
         placeBet,
+        adjustBalance,
         claimRefill,
         canClaimRefill,
         dailyBonusAmount,
