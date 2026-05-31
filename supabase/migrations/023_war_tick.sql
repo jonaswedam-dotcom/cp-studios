@@ -171,8 +171,10 @@ begin
                      where b.owner_id = p.user_id and b.type = 'bank'), 0) as lv
     from public.war_players p
   ), calc as (
+    -- accrued kept numeric (not cast to int) so a long-offline pre-cap value can't overflow
+    -- int before the cap clamps it below; the final vault is cast to int after capping.
     select user_id, vault, last_income_at, lv,
-           floor(lv * 50 * greatest(0, extract(epoch from (now() - last_income_at)) / 3600.0))::int as accrued,
+           floor(lv * 50 * greatest(0, extract(epoch from (now() - last_income_at)) / 3600.0)) as accrued,
            lv * 50 * 10 as cap
     from bank
   )
