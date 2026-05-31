@@ -1,7 +1,14 @@
 import { UNITS, UNIT_TYPES } from './units.js'
 
 export function emptyStack() {
-  return { soldier: 0, tank: 0, jet: 0 }
+  return { soldier: 0, tank: 0, jet: 0, warship: 0 }
+}
+
+// Build a stack object from a war_regions row (or movement), reading UNIT_TYPES.
+export function stackFromRow(row) {
+  const s = emptyStack()
+  for (const t of UNIT_TYPES) s[t] = row?.[t] || 0
+  return s
 }
 
 export function stackTotal(stack) {

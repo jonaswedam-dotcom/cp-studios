@@ -6,6 +6,7 @@ export const UNIT_SVG = {
   soldier: '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.2" fill="currentColor"/><path d="M5 19 C5 12.5,19 12.5,19 19 Z" fill="currentColor"/></svg>',
   tank:    '<svg viewBox="0 0 24 24"><rect x="3" y="13" width="17" height="6" rx="2" fill="currentColor"/><rect x="7" y="8" width="9" height="5" rx="1.5" fill="currentColor"/><rect x="15" y="9.5" width="7" height="2" fill="currentColor"/></svg>',
   jet:     '<svg viewBox="0 0 24 24"><path d="M12 2 l1.7 9 7 3.4 -7 -.7 -.9 6.3 -1.6 0 -.9 -6.3 -7 .7 7 -3.4 Z" fill="currentColor"/></svg>',
+  warship: '<svg viewBox="0 0 24 24"><path d="M3 14 h18 l-2.5 5 a2 2 0 0 1 -1.8 1 H7.3 a2 2 0 0 1 -1.8 -1 Z" fill="currentColor"/><rect x="10" y="6" width="2" height="7" fill="currentColor"/><rect x="12" y="7" width="6" height="2" fill="currentColor"/></svg>',
 }
 
 export function UnitIcon({ type, className = 'w-4 h-4' }) {

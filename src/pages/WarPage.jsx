@@ -10,8 +10,8 @@ import BuyUnitsModal from '../war/BuyUnitsModal.jsx'
 import MoveUnitsModal from '../war/MoveUnitsModal.jsx'
 import { UNITS, UNIT_TYPES, START_ARMY } from '../war/units.js'
 import { troopCost } from '../war/economy.js'
-import { resolveCombat, emptyStack } from '../war/combat.js'
-import { landNeighbors, airReachable } from '../war/geo.js'
+import { resolveCombat, emptyStack, stackFromRow } from '../war/combat.js'
+import { landNeighbors, airReachable, seaReachable } from '../war/geo.js'
 import { pickRandomSpawn } from '../war/spawn.js'
 
 // Flip to false to enable the live game.
@@ -155,7 +155,7 @@ function WarGame() {
           .update({ [mv.unit_type]: (dest[mv.unit_type] || 0) + mv.count, updated_at: new Date().toISOString() })
           .eq('region_id', mv.to_region)
       } else {
-        const defense = { soldier: dest.soldier, tank: dest.tank, jet: dest.jet }
+        const defense = stackFromRow(dest)
         const r = resolveCombat(incoming, defense)
         if (r.winner === 'attacker') {
           await supabase.from('war_regions').update({
@@ -188,9 +188,11 @@ function WarGame() {
     if (!src || src.owner_id !== userId) { setSelected(null); return } // lost the source meanwhile
     const reachableLand = landNeighbors(selected, graph)
     const reachableAir  = graph ? airReachable(selected, graph, UNITS.jet.airRangeKm) : []
+    const reachableSea  = graph ? seaReachable(selected, graph, UNITS.warship.seaRangeKm) : []
     const hasLand = (src.soldier || 0) > 0 || (src.tank || 0) > 0
     const hasJet  = (src.jet || 0) > 0
-    const canReach = (reachableLand.includes(regionId) && hasLand) || (reachableAir.includes(regionId) && hasJet)
+    const hasSea  = (src.warship || 0) > 0
+    const canReach = (reachableLand.includes(regionId) && hasLand) || (reachableAir.includes(regionId) && hasJet) || (reachableSea.includes(regionId) && hasSea)
     if (canReach) { setMoveFrom(selected); return }
     if (row?.owner_id === userId) setSelected(regionId)
     else setSelected(null)

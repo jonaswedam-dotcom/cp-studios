@@ -27,7 +27,7 @@ test('exact tie -> defender holds with a token survivor', () => {
 })
 
 test('emptyStack has all unit types at 0', () => {
-  assert.deepEqual(emptyStack(), { soldier: 0, tank: 0, jet: 0 })
+  assert.deepEqual(emptyStack(), { soldier: 0, tank: 0, jet: 0, warship: 0 })
 })
 
 test('a razor-thin attacker win still keeps at least one unit (no ghost province)', () => {

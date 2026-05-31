@@ -17,7 +17,7 @@ export default function BuyUnitsModal({ balance, onConfirm, onClose, loading }) 
       <div className="relative w-full max-w-sm bg-cp-card border border-cp-border rounded-3xl p-6 space-y-5 shadow-2xl">
         <h3 className="font-display text-lg text-cp-text">Buy Units</h3>
 
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-4 gap-2">
           {UNIT_TYPES.map((t) => (
             <button key={t} onClick={() => { setType(t); setCount('') }}
               className={`flex flex-col items-center gap-1 py-2.5 rounded-xl border text-xs transition-colors ${

@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { UNITS, UNIT_TYPES } from './units.js'
-import { landNeighbors, airReachable } from './geo.js'
+import { landNeighbors, airReachable, seaReachable } from './geo.js'
 import { UnitIcon } from './icons.jsx'
 
 export default function MoveUnitsModal({ graph, regions, fromRegion, onConfirm, onClose, loading }) {
@@ -14,9 +14,11 @@ export default function MoveUnitsModal({ graph, regions, fromRegion, onConfirm, 
   // Destinations the chosen unit type can reach.
   const destinations = useMemo(() => {
     if (!graph) return []
-    const ids = UNITS[type].mode === 'air'
-      ? airReachable(fromRegion, graph, UNITS[type].airRangeKm)
-      : landNeighbors(fromRegion, graph)
+    const mode = UNITS[type].mode
+    let ids = []
+    if (mode === 'air') ids = airReachable(fromRegion, graph, UNITS[type].airRangeKm)
+    else if (mode === 'sea') ids = seaReachable(fromRegion, graph, UNITS[type].seaRangeKm)
+    else ids = landNeighbors(fromRegion, graph)
     return ids.map((id) => ({
       id,
       label: graph.regions[id]?.city || graph.regions[id]?.name || id,
@@ -37,7 +39,7 @@ export default function MoveUnitsModal({ graph, regions, fromRegion, onConfirm, 
       <div className="relative w-full max-w-sm bg-cp-card border border-cp-border rounded-3xl p-6 space-y-4 shadow-2xl">
         <h3 className="font-display text-lg text-cp-text">{isAttack ? '⚔️ Attack' : '🏃 Move Units'}</h3>
 
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-4 gap-2">
           {UNIT_TYPES.map((t) => (
             <button key={t} disabled={available(t) === 0}
               onClick={() => { setType(t); setDest(''); setCount('') }}
