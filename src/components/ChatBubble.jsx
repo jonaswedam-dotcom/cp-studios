@@ -13,13 +13,25 @@ import {
   uploadDmImage,
 } from '../lib/dm'
 
-// ── localStorage key ───────────────────────────────────────
+// ── localStorage keys ──────────────────────────────────────
 const chatVisitKey = (uid) => `cp-studios:chat-last-visit:${uid}`
+const dmVisitKey   = (uid, threadId) => `cp-studios:dm-last-visit:${uid}:${threadId}`
 
 // ── Main ChatBubble ────────────────────────────────────────
 export default function ChatBubble() {
   const { currentUser, session, chatOpen, setChatOpen } = useApp()
   const userId = session?.user?.id
+
+  // ── DM unread helpers ──────────────────────────────────────
+  const markDmRead = (threadId) => {
+    if (userId) localStorage.setItem(dmVisitKey(userId, threadId), new Date().toISOString())
+  }
+  const isThreadUnread = (t) => {
+    if (!userId || !t?.last_message_at) return false
+    if (t.last_sender_id === userId) return false
+    const seen = localStorage.getItem(dmVisitKey(userId, t.thread_id))
+    return new Date(t.last_message_at).getTime() > (seen ? new Date(seen).getTime() : 0)
+  }
 
   // ── Group chat state ───────────────────────────────────────
   const [messages,     setMessages]     = useState([])
@@ -293,12 +305,13 @@ export default function ChatBubble() {
   // ── DM: open thread ────────────────────────────────────────
   const openThread = useCallback((threadId) => {
     setActiveThreadId(threadId)
+    markDmRead(threadId)
     if (loadedThreadsRef.current.has(threadId)) return
     loadedThreadsRef.current.add(threadId)
     fetchThreadMessages(threadId)
       .then(msgs => setThreadMessages(p => ({ ...p, [threadId]: msgs })))
       .catch(err => { loadedThreadsRef.current.delete(threadId); console.error('fetchThreadMessages failed:', err) })
-  }, [])
+  }, [userId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Tab switch: clear draft so group/DM drafts can't cross ──
   const switchTab = (tab) => {
@@ -359,6 +372,9 @@ export default function ChatBubble() {
   const dmHandleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dmSend() }
   }
+
+  // ── DM combined unread ─────────────────────────────────────
+  const anyDmUnread = threads.some(isThreadUnread)
 
   // ── Build list items ───────────────────────────────────────
   const listItems = buildListItems(messages)
@@ -442,7 +458,7 @@ export default function ChatBubble() {
         activeThreadId={activeThreadId}
         onSelect={openThread}
         onCompose={handleCompose}
-        unreadFor={() => false}
+        unreadFor={(id) => { const t = threads.find(x => x.thread_id === id); return t ? isThreadUnread(t) : false }}
       />
     )
   }
@@ -472,7 +488,7 @@ export default function ChatBubble() {
             text-cp-muted hover:text-cp-text transition-colors z-50"
         >
           {chatOpen ? <ChevronRightIcon /> : <ChevronLeftIcon />}
-          {!chatOpen && hasChatDot && (
+          {!chatOpen && (hasChatDot || anyDmUnread) && (
             <span className="w-2 h-2 rounded-full bg-red-500" />
           )}
         </button>
@@ -504,6 +520,12 @@ export default function ChatBubble() {
               }`}
             >
               {tab === 'group' ? 'Group' : 'Direct'}
+              {tab === 'group' && hasChatDot && (
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 ml-1 align-middle" />
+              )}
+              {tab === 'direct' && anyDmUnread && (
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 ml-1 align-middle" />
+              )}
             </button>
           ))}
         </div>
@@ -565,6 +587,12 @@ export default function ChatBubble() {
                 }`}
               >
                 {tab === 'group' ? 'Group' : 'Direct'}
+                {tab === 'group' && hasChatDot && (
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 ml-1 align-middle" />
+                )}
+                {tab === 'direct' && anyDmUnread && (
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 ml-1 align-middle" />
+                )}
               </button>
             ))}
           </div>
@@ -596,7 +624,7 @@ export default function ChatBubble() {
           aria-label="Toggle chat"
         >
           <BubbleIcon />
-          {hasChatDot && !chatOpen && (
+          {(hasChatDot || anyDmUnread) && !chatOpen && (
             <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-red-500 ring-2 ring-cp-bg" />
           )}
         </button>
