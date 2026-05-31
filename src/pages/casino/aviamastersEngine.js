@@ -8,17 +8,13 @@ export const START_MULT = 1.0
 export const MAX_MULT   = 250
 
 // How many collectible slots a flight has (weighted).
+// Capped at 5 to limit compound growth from multiplicative nodes.
 export const NODE_COUNT = [
-  { value: 1,  weight: 2  },
-  { value: 2,  weight: 5  },
-  { value: 3,  weight: 12 },
-  { value: 4,  weight: 18 },
-  { value: 5,  weight: 22 },
-  { value: 6,  weight: 18 },
-  { value: 7,  weight: 12 },
-  { value: 8,  weight: 6  },
-  { value: 9,  weight: 3  },
-  { value: 10, weight: 2  },
+  { value: 1, weight: 15 },
+  { value: 2, weight: 30 },
+  { value: 3, weight: 30 },
+  { value: 4, weight: 18 },
+  { value: 5, weight: 7  },
 ]
 
 // Per-slot probability a slot is a rocket (÷2) instead of a value node.
@@ -26,7 +22,8 @@ export const NODE_COUNT = [
 export const ROCKET_CHANCE = 0.18
 
 // Given a value node, probability it is multiplicative (vs additive).
-export const MULT_NODE_SHARE = 0.5
+// Lower share keeps average mult modest; additive nodes feel gentler.
+export const MULT_NODE_SHARE = 0.25
 
 // Multiplicative node faces (×N) and their relative weights.
 export const MULT_NODES = [
@@ -36,17 +33,19 @@ export const MULT_NODES = [
   { value: 5, weight: 7  },
 ]
 
-// Additive node faces (+N) and their relative weights.
+// Additive node faces (+N fractional) and their relative weights.
+// Kept small relative to the 1.0 start so a single add node can't
+// rocket the multiplier on its own; ×N nodes supply the big jumps.
 export const ADD_NODES = [
-  { value: 1,  weight: 45 },
-  { value: 2,  weight: 30 },
-  { value: 5,  weight: 18 },
-  { value: 10, weight: 7  },
+  { value: 0.1, weight: 45 },
+  { value: 0.2, weight: 30 },
+  { value: 0.5, weight: 18 },
+  { value: 1.0, weight: 7  },
 ]
 
 // Probability the plane lands (wins) vs splashes (loses). Independent of the
-// multiplier. TUNED IN TASK 2 so simulated RTP ≈ 0.97. Placeholder until then.
-export const P_LAND = 0.5
+// multiplier. Tuned via scripts/aviamasters-sim.mjs for ~97% RTP.
+export const P_LAND = 0.3709
 
 // Animation tick interval (ms per event) per speed setting. UI-only; no effect
 // on odds or payouts.
