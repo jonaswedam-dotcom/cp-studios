@@ -20,6 +20,8 @@ export default function ChatBubble() {
   const [sending,      setSending]      = useState(false)
   const [typingUsers,  setTypingUsers]  = useState({})
 
+  const [activeTab, setActiveTab] = useState('group')
+
   const desktopScrollRef = useRef(null)
   const mobileScrollRef  = useRef(null)
   const textareaRef   = useRef(null)
@@ -275,8 +277,32 @@ export default function ChatBubble() {
           </button>
         </div>
 
+        {/* Tab bar */}
+        <div className="flex-none flex border-b border-cp-border">
+          {['group', 'direct'].map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`flex-1 py-2 text-xs font-medium transition-colors ${
+                activeTab === tab
+                  ? 'text-cp-text border-b-2 border-cp-accent'
+                  : 'text-cp-muted hover:text-cp-text'
+              }`}
+            >
+              {tab === 'group' ? 'Group' : 'Direct'}
+            </button>
+          ))}
+        </div>
+
         {/* Chat body */}
-        <ConversationThread {...panelBodyProps} scrollRef={desktopScrollRef} />
+        <div className={activeTab === 'group' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
+          <ConversationThread {...panelBodyProps} scrollRef={desktopScrollRef} />
+        </div>
+        {activeTab === 'direct' && (
+          <div className="flex-1 flex items-center justify-center text-cp-muted text-xs">
+            Direct messages — coming up
+          </div>
+        )}
       </div>
 
       {/* ════════════════════════════════════════════════════════════
@@ -312,7 +338,31 @@ export default function ChatBubble() {
             </button>
           </div>
 
-          <ConversationThread {...panelBodyProps} scrollRef={mobileScrollRef} />
+          {/* Tab bar */}
+          <div className="flex-none flex border-b border-cp-border">
+            {['group', 'direct'].map(tab => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`flex-1 py-2 text-xs font-medium transition-colors ${
+                  activeTab === tab
+                    ? 'text-cp-text border-b-2 border-cp-accent'
+                    : 'text-cp-muted hover:text-cp-text'
+                }`}
+              >
+                {tab === 'group' ? 'Group' : 'Direct'}
+              </button>
+            ))}
+          </div>
+
+          <div className={activeTab === 'group' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
+            <ConversationThread {...panelBodyProps} scrollRef={mobileScrollRef} />
+          </div>
+          {activeTab === 'direct' && (
+            <div className="flex-1 flex items-center justify-center text-cp-muted text-xs">
+              Direct messages — coming up
+            </div>
+          )}
         </div>
 
         {/* Floating button */}
