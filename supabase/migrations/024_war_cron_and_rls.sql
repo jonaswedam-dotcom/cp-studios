@@ -30,3 +30,23 @@ create policy "war_buildings_delete" on public.war_buildings for delete using (o
 -- from migration 019 is unchanged.
 drop policy if exists "war_movements_update" on public.war_movements;
 create policy "war_movements_update" on public.war_movements for update using (auth.uid() = player_id);
+
+-- Backstop: a movement must carry a positive count (a fabricated count<=0 inserted
+-- directly would otherwise feed nonsensical strength/loot math into the tick).
+alter table public.war_movements drop  constraint if exists war_movements_count_check;
+alter table public.war_movements add   constraint war_movements_count_check check (count > 0);
+
+-- Lock down RPC execute grants. war_tick takes no caller input and is global; clients must
+-- NOT be able to force off-schedule resolution — only pg_cron (running as the job owner,
+-- unaffected by these revokes) should call it. war_collect_income stays callable by signed-in
+-- users (it self-checks auth.uid()), matching the donate_coins grant pattern.
+revoke all on function public.war_tick()           from public, anon, authenticated;
+revoke all on function public.war_collect_income()  from public, anon;
+grant  execute on function public.war_collect_income() to authenticated;
+
+-- NOTE (intended-vs-enforced, accepted for this friends-and-family app): movement rows are
+-- still inserted client-side, so the count/unit_type fed to server combat are client-trusted
+-- (a determined member could fabricate a movement, equivalent to the already-accepted ability
+-- to edit their own wallet / own-region unit counts — see CLAUDE.md §4). Making combat INPUTS
+-- fully server-authoritative would require a send_units() SECURITY DEFINER RPC that validates
+-- and debits the source region; that is a deliberate future step, not built here.

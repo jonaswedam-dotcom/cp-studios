@@ -37,7 +37,10 @@ begin
     return 0;
   end if;
   update public.war_players set vault = 0, last_active_at = now() where user_id = uid;
-  if v > 0 then update public.wallets set balance = balance + v where user_id = uid; end if;
+  if v > 0 then
+    insert into public.wallets (user_id, balance) values (uid, v)
+    on conflict (user_id) do update set balance = public.wallets.balance + excluded.balance;
+  end if;
   return v;
 end;
 $$;
@@ -128,7 +131,10 @@ begin
           -- capture: attacker survivors (single unit type), spoils, building downgrade
           surv := greatest(1, floor(mv.count * (a_str - d_str) / a_str)); -- ensureSurvivor parity
           loot := floor(0.8 * def_raw * 5); -- lootFraction(full kill)=0.8 × defStrength × COIN_PER_STRENGTH(5)
-          if loot > 0 then update public.wallets set balance = balance + loot where user_id = mv.player_id; end if;
+          if loot > 0 then
+            insert into public.wallets (user_id, balance) values (mv.player_id, loot)
+            on conflict (user_id) do update set balance = public.wallets.balance + excluded.balance;
+          end if;
           delete from public.war_buildings where region_id = mv.to_region and level <= 1;
           update public.war_buildings set level = level - 1, owner_id = mv.player_id where region_id = mv.to_region and level > 1;
           update public.war_regions
@@ -157,7 +163,7 @@ begin
     vault = least(
       p.vault + floor(
         (select coalesce(sum(level), 0) from public.war_buildings b where b.owner_id = p.user_id and b.type = 'bank')
-        * 50 * (extract(epoch from (now() - p.last_income_at)) / 3600.0)
+        * 50 * greatest(0, extract(epoch from (now() - p.last_income_at)) / 3600.0)
       ),
       greatest(
         p.vault,
