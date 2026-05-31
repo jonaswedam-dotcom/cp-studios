@@ -6,8 +6,8 @@ export function troopCost(type, count, costMult = 1) {
   return Math.round(u.cost * count * costMult)
 }
 
-export function maxAffordable(type, balance) {
+export function maxAffordable(type, balance, costMult = 1) {
   const u = UNITS[type]
   if (!u) return 0
-  return Math.max(0, Math.floor((balance ?? 0) / u.cost))
+  return Math.max(0, Math.floor((balance ?? 0) / (u.cost * costMult)))
 }

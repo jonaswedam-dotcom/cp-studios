@@ -3,12 +3,12 @@ import { UNITS, UNIT_TYPES } from './units.js'
 import { troopCost, maxAffordable } from './economy.js'
 import { UnitIcon } from './icons.jsx'
 
-export default function BuyUnitsModal({ balance, onConfirm, onClose, loading }) {
+export default function BuyUnitsModal({ balance, costMult = 1, onConfirm, onClose, loading }) {
   const [type, setType]   = useState('soldier')
   const [count, setCount] = useState('')
-  const max   = maxAffordable(type, balance)
+  const max   = maxAffordable(type, balance, costMult)
   const n     = parseInt(count) || 0
-  const cost  = troopCost(type, n)
+  const cost  = troopCost(type, n, costMult)
   const valid = n >= 1 && n <= max
 
   return (

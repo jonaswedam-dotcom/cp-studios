@@ -23,3 +23,8 @@ test('troopCost applies an optional cost multiplier', () => {
   assert.equal(troopCost('soldier', 10, 0.8), 800) // 1000 * 0.8
   assert.equal(troopCost('soldier', 10), 1000)     // default 1
 })
+
+test('maxAffordable accounts for a cost multiplier (factory discount)', () => {
+  assert.equal(maxAffordable('soldier', 950, 0.8), 11) // 80/ea -> 11
+  assert.equal(maxAffordable('soldier', 950), 9)       // default 1
+})

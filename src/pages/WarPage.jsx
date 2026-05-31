@@ -147,6 +147,7 @@ function WarGame() {
     if (busy || !buildFor) return
     setBusy(true)
     try {
+      if (regions[buildFor]?.owner_id !== userId) { showFlash('You no longer own this province.'); return }
       const cost = buildingCost(type, 0)
       if ((balance ?? 0) < cost) { showFlash('Not enough coins.'); return }
       if (buildingsIn(buildFor).length >= SLOTS_PER_REGION) { showFlash('No slots left.'); return }
@@ -155,20 +156,22 @@ function WarGame() {
       await adjustBalance(-cost)
       showFlash(`Built ${type}.`)
     } finally { setBusy(false) }
-  }, [busy, buildFor, balance, buildings, userId, adjustBalance])
+  }, [busy, buildFor, balance, buildings, regions, userId, adjustBalance])
 
   const handleUpgrade = useCallback(async (b) => {
     if (busy) return
     setBusy(true)
     try {
+      if (b.owner_id !== userId || regions[buildFor]?.owner_id !== userId) { showFlash('You no longer own this building.'); return }
       const cost = buildingCost(b.type, b.level)
+      if (b.level >= 3) { showFlash('Already max level.'); return }
       if ((balance ?? 0) < cost) { showFlash('Not enough coins.'); return }
       const { error } = await supabase.from('war_buildings').update({ level: b.level + 1 }).eq('id', b.id)
       if (error) { showFlash('Upgrade failed.'); return }
       await adjustBalance(-cost)
       showFlash(`Upgraded ${b.type} to Lv ${b.level + 1}.`)
     } finally { setBusy(false) }
-  }, [busy, balance, adjustBalance])
+  }, [busy, buildFor, balance, regions, userId, adjustBalance])
 
   // ── Resolve arrived movements (client poll; Phase 3 moves this server-side) ──
   const resolveMovements = useCallback(async () => {
@@ -278,7 +281,7 @@ function WarGame() {
 
   return (
     <div className="flex flex-col lg:flex-row h-[calc(100vh-64px)] overflow-hidden bg-[#0a0a0a]">
-      {showBuy && <BuyUnitsModal balance={balance} loading={busy} onConfirm={handleBuy} onClose={() => setShowBuy(false)} />}
+      {showBuy && <BuyUnitsModal balance={balance} costMult={myCostMult} loading={busy} onConfirm={handleBuy} onClose={() => setShowBuy(false)} />}
       {moveFrom && <MoveUnitsModal graph={graph} regions={regions} fromRegion={moveFrom} loading={busy} onConfirm={handleMove} onClose={() => { setMoveFrom(null); setSelected(null) }} />}
       {buildFor && (
         <BuildingsModal regionName={graph.regions[buildFor]?.city || buildFor}
