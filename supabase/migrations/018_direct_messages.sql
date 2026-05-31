@@ -169,9 +169,9 @@ security definer
 set search_path = public
 as $$
   select
-    u.id,
-    coalesce(u.raw_user_meta_data->>'full_name', split_part(u.email, '@', 1), 'Member'),
-    coalesce(u.raw_user_meta_data->>'avatar_url', '')
+    u.id                                                                          as user_id,
+    coalesce(u.raw_user_meta_data->>'full_name', split_part(u.email, '@', 1), 'Member') as full_name,
+    coalesce(u.raw_user_meta_data->>'avatar_url', '')                             as avatar_url
   from auth.users u
   where u.id <> auth.uid()
     and (
