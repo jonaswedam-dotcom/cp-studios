@@ -383,9 +383,9 @@ export function ShrinkIcon() {
 
 Move `formatTime`, `formatDateLabel`, `isSameDay`, `TypingIndicator`, `DateSeparator`, `MessageBubble`, and the `ChatPanelBody` body into `src/components/chat/ConversationThread.jsx`. Rename `ChatPanelBody` → `ConversationThread` and import icons from `./chatIcons`. Keep the **same props** it already receives (`messages`, `hasLoaded`, `typingNames`, `imagePreview`, `text`, `sending`, `onTextChange`, `onKeyDown`, `onSend`, `onImageFile`, `onClearImage`, `onMediaLoad`, `scrollRef`, `textareaRef`, `fileRef`, `userId`) plus one new optional prop `placeholder` (string, default `'Message everyone…'`) used for the textarea placeholder so DMs can say `Message <name>…`. Replace the hardcoded `placeholder="Message everyone…"` with `placeholder={placeholder}`.
 
-- [ ] **Step 3: Fix the scroll-ref inconsistency**
+- [ ] **Step 3: Preserve the existing dual scroll-ref approach**
 
-`ChatBubble` defines `desktopScrollRef`/`mobileScrollRef` but `scrollToBottom`/`panelBodyProps` reference an undefined `scrollRef`. Since only one panel (desktop **or** mobile) is interactive at a time, consolidate to a single `scrollRef = useRef(null)` used by whichever `ConversationThread` is mounted, and delete the unused `desktopScrollRef`/`mobileScrollRef`. Render `ConversationThread` once per breakpoint (the existing `hidden lg:flex` / `lg:hidden` wrappers) but pass the same `scrollRef`; the off-screen one is inert.
+The baseline already resolves the old `scrollRef` issue: `ChatBubble` holds separate `desktopScrollRef`/`mobileScrollRef`, `scrollToBottom` scrolls both (the hidden one reports `scrollHeight 0` and is a no-op), and each `ChatPanelBody` is passed its own ref via `scrollRef={desktopScrollRef}` / `scrollRef={mobileScrollRef}`. **Keep this pattern** — `ConversationThread` still takes a `scrollRef` prop (it is **not** part of the shared `panelBodyProps`; it's passed per-instance). Do not consolidate or delete the dual refs.
 
 - [ ] **Step 4: Rewire `ChatBubble.jsx`**
 
