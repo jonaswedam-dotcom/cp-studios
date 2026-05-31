@@ -2,7 +2,7 @@
 // Uses Natural Earth 10m admin-1 (~4.6k provinces) quantized + simplified so the shipped
 // GeoJSON stays small; the game caps zoom, so simplification is invisible in play.
 // Generates:
-//   public/war/provinces.geojson  – simplified admin-1 polygons, each feature has properties.adm1_code
+//   public/war/provinces.topojson – compact TopoJSON (shared arcs + quantized), converted to GeoJSON client-side
 //   public/war/provinces.json     – { regions: { [adm1_code]: {name, city, country, centroid:[lng,lat], neighbors:[adm1_code,...]} } }
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { topology } from 'topojson-server'

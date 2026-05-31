@@ -1,5 +1,3 @@
-import { UNIT_TYPES } from './units.js'
-
 export default function Sidebar({ me, myRegions, myUnits, balance, leaderboard, onBuy, eliminated }) {
   return (
     <aside className="w-full lg:w-72 flex-shrink-0 bg-cp-card border-t lg:border-t-0 lg:border-l border-cp-border overflow-y-auto">

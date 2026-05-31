@@ -65,7 +65,9 @@ create policy "war_regions_update"   on public.war_regions   for update using (a
 
 create policy "war_movements_select" on public.war_movements for select using (auth.role() = 'authenticated');
 create policy "war_movements_insert" on public.war_movements for insert with check (auth.uid() = player_id);
-create policy "war_movements_update" on public.war_movements for update using (auth.uid() = player_id);
+-- Broad update: any client runs the Phase 1 resolver and must mark others' movements arrived.
+-- Phase 3 replaces this with a server-side RPC.
+create policy "war_movements_update" on public.war_movements for update using (auth.role() = 'authenticated');
 
 -- ── Realtime ──────────────────────────────────────────────────────────────────
 -- Run in Supabase dashboard (Database → Replication) or via SQL:

@@ -3,7 +3,7 @@ import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { feature } from 'topojson-client'
 import { markerEl } from './icons.jsx'
-import { UNIT_TYPES } from './units.js'
+import { UNITS, UNIT_TYPES } from './units.js'
 
 const BASE_STYLE = {
   version: 8,
@@ -37,6 +37,8 @@ export default function MapView({ graph, regions, movements, onRegionClick }) {
   const markersRef = useRef([])     // unit/HQ markers
   const moveMarkersRef = useRef({}) // movement id -> marker
   const readyRef   = useRef(false)
+  const onClickRef = useRef(onRegionClick)
+  useEffect(() => { onClickRef.current = onRegionClick })
 
   // Init map once
   useEffect(() => {
@@ -68,7 +70,7 @@ export default function MapView({ graph, regions, movements, onRegionClick }) {
       })
       map.on('click', 'province-fills', (e) => {
         const f = e.features?.[0]
-        if (f) onRegionClick(f.properties.adm1_code)
+        if (f) onClickRef.current(f.properties.adm1_code)
       })
       map.getCanvas().style.cursor = 'pointer'
       readyRef.current = true
@@ -123,8 +125,9 @@ export default function MapView({ graph, regions, movements, onRegionClick }) {
         const from = graph.regions[mv.from_region]?.centroid
         const to   = graph.regions[mv.to_region]?.centroid
         if (!from || !to) return
-        const total = new Date(mv.arrives_at) - new Date(mv.created_at)
-        const t = Math.min(1, Math.max(0, (now - new Date(mv.created_at).getTime()) / total))
+        const dur = (UNITS[mv.unit_type]?.travelSeconds || 30) * 1000
+        const startMs = mv.created_at ? new Date(mv.created_at).getTime() : (new Date(mv.arrives_at).getTime() - dur)
+        const t = Math.min(1, Math.max(0, (now - startMs) / dur))
         const lng = from[0] + (to[0] - from[0]) * t
         const lat = from[1] + (to[1] - from[1]) * t
         live.add(mv.id)

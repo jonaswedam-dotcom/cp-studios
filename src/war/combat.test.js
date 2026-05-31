@@ -29,3 +29,10 @@ test('exact tie -> defender holds with a token survivor', () => {
 test('emptyStack has all unit types at 0', () => {
   assert.deepEqual(emptyStack(), { soldier: 0, tank: 0, jet: 0 })
 })
+
+test('a razor-thin attacker win still keeps at least one unit (no ghost province)', () => {
+  // 1 tank (str 5) vs 4 soldiers (str 4): attacker wins; floor would give 0 tanks.
+  const r = resolveCombat({ tank: 1 }, { soldier: 4 })
+  assert.equal(r.winner, 'attacker')
+  assert.ok(stackTotal(r.survivors) >= 1)
+})

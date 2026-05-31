@@ -18,19 +18,24 @@ export function useWarData(userId) {
   }, [])
 
   const loadAll = useCallback(async () => {
-    const [rRes, pRes, mRes] = await Promise.all([
-      supabase.from('war_regions').select('*'),
-      supabase.from('war_players').select('*'),
-      supabase.from('war_movements').select('*').eq('status', 'moving'),
-    ])
-    if (rRes.data) {
-      const m = {}
-      rRes.data.forEach(row => { m[row.region_id] = row })
-      setRegions(m)
+    try {
+      const [rRes, pRes, mRes] = await Promise.all([
+        supabase.from('war_regions').select('*'),
+        supabase.from('war_players').select('*'),
+        supabase.from('war_movements').select('*').eq('status', 'moving'),
+      ])
+      if (rRes.data) {
+        const m = {}
+        rRes.data.forEach(row => { m[row.region_id] = row })
+        setRegions(m)
+      }
+      if (pRes.data) setPlayers(pRes.data)
+      if (mRes.data) setMovements(mRes.data)
+    } catch (e) {
+      console.error('[useWarData] loadAll error', e)
+    } finally {
+      setLoading(false)
     }
-    if (pRes.data) setPlayers(pRes.data)
-    if (mRes.data) setMovements(mRes.data)
-    setLoading(false)
   }, [])
 
   useEffect(() => { if (userId) loadAll() }, [userId, loadAll])

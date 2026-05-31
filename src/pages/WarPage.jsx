@@ -10,7 +10,7 @@ import BuyUnitsModal from '../war/BuyUnitsModal.jsx'
 import MoveUnitsModal from '../war/MoveUnitsModal.jsx'
 import { UNITS, UNIT_TYPES, START_ARMY } from '../war/units.js'
 import { troopCost } from '../war/economy.js'
-import { stackStrength, resolveCombat, emptyStack } from '../war/combat.js'
+import { resolveCombat, emptyStack } from '../war/combat.js'
 import { landNeighbors, airReachable } from '../war/geo.js'
 import { pickRandomSpawn } from '../war/spawn.js'
 
@@ -94,19 +94,21 @@ function WarGame() {
         const claimed = new Set(Object.keys(regions))
         const spawn = pickRandomSpawn(graph, claimed, Math.random)
         if (!spawn) { showFlash('No room to respawn.'); return }
-        await adjustBalance(-cost)
-        await supabase.from('war_regions').upsert({
+        const { error: upErr } = await supabase.from('war_regions').upsert({
           region_id: spawn, owner_id: userId, owner_name: me.display_name, color: me.color,
           is_hq: true, ...emptyStack(), [type]: count,
         }, { onConflict: 'region_id' })
+        if (upErr) { showFlash('Respawn failed.'); return }
+        await adjustBalance(-cost)
         await supabase.from('war_players').update({ spawn_region: spawn }).eq('user_id', userId)
         showFlash(`Respawned in ${graph.regions[spawn]?.city || spawn}!`)
         return
       }
-      await adjustBalance(-cost)
-      await supabase.from('war_regions')
+      const { error: upErr } = await supabase.from('war_regions')
         .update({ [type]: (target[type] || 0) + count, updated_at: new Date().toISOString() })
         .eq('region_id', target.region_id)
+      if (upErr) { showFlash('Purchase failed.'); return }
+      await adjustBalance(-cost)
       showFlash(`+${count} ${UNITS[type].label}${count > 1 ? 's' : ''}`)
     } finally { setShowBuy(false); setBusy(false) }
   }, [busy, me, balance, myRegionRows, regions, graph, userId, adjustBalance])
@@ -117,7 +119,7 @@ function WarGame() {
     setBusy(true)
     try {
       const src = regions[moveFrom]
-      if (!src || (src[type] || 0) < count) { showFlash('Not enough units.'); return }
+      if (!src || src.owner_id !== userId || (src[type] || 0) < count) { showFlash('Move no longer valid.'); return }
       const mode = UNITS[type].mode
       const arrivesAt = new Date(Date.now() + UNITS[type].travelSeconds * 1000).toISOString()
       await supabase.from('war_regions')
@@ -135,8 +137,9 @@ function WarGame() {
     const now = Date.now()
     const due = movements.filter((m) => m.status === 'moving' && new Date(m.arrives_at).getTime() <= now)
     for (const mv of due) {
-      const { error } = await supabase.from('war_movements').update({ status: 'arrived' }).eq('id', mv.id).eq('status', 'moving')
-      if (error) continue
+      const { data: claimed } = await supabase.from('war_movements')
+        .update({ status: 'arrived' }).eq('id', mv.id).eq('status', 'moving').select('id')
+      if (!claimed || claimed.length === 0) continue // another client already resolved it
       const dest = regions[mv.to_region]
       const player = players.find((p) => p.user_id === mv.player_id)
       const incoming = { ...emptyStack(), [mv.unit_type]: mv.count }
@@ -182,11 +185,13 @@ function WarGame() {
     }
     if (regionId === selected) { setSelected(null); return }
     const src = regions[selected]
+    if (!src || src.owner_id !== userId) { setSelected(null); return } // lost the source meanwhile
     const reachableLand = landNeighbors(selected, graph)
     const reachableAir  = graph ? airReachable(selected, graph, UNITS.jet.airRangeKm) : []
-    const canReach = reachableLand.includes(regionId) || reachableAir.includes(regionId)
-    const hasUnits = src && UNIT_TYPES.some((t) => (src[t] || 0) > 0)
-    if (canReach && hasUnits) { setMoveFrom(selected); return }
+    const hasLand = (src.soldier || 0) > 0 || (src.tank || 0) > 0
+    const hasJet  = (src.jet || 0) > 0
+    const canReach = (reachableLand.includes(regionId) && hasLand) || (reachableAir.includes(regionId) && hasJet)
+    if (canReach) { setMoveFrom(selected); return }
     if (row?.owner_id === userId) setSelected(regionId)
     else setSelected(null)
   }, [selected, regions, userId, graph])

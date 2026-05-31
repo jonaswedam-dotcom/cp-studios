@@ -21,6 +21,14 @@ function scaleToStrength(stack, fromStrength, targetStrength) {
   return out
 }
 
+// Guarantee at least one surviving unit for a winner (avoid a 0-unit owned region).
+function ensureSurvivor(survivors, original) {
+  if (stackTotal(survivors) > 0) return survivors
+  let best = 'soldier', n = -1
+  for (const t of UNIT_TYPES) if ((original[t] || 0) > n) { n = original[t] || 0; best = t }
+  return { ...survivors, [best]: 1 }
+}
+
 // attackStack invades a region held by defenseStack.
 // Returns { winner: 'attacker'|'defender', survivors: stack-of-winner }.
 export function resolveCombat(attackStack, defenseStack) {
@@ -30,10 +38,10 @@ export function resolveCombat(attackStack, defenseStack) {
   const dStr = stackStrength(def)
 
   if (aStr > dStr) {
-    return { winner: 'attacker', survivors: scaleToStrength(atk, aStr, aStr - dStr) }
+    return { winner: 'attacker', survivors: ensureSurvivor(scaleToStrength(atk, aStr, aStr - dStr), atk) }
   }
   if (dStr > aStr) {
-    return { winner: 'defender', survivors: scaleToStrength(def, dStr, dStr - aStr) }
+    return { winner: 'defender', survivors: ensureSurvivor(scaleToStrength(def, dStr, dStr - aStr), def) }
   }
   // tie: defender holds with a single token soldier
   return { winner: 'defender', survivors: { ...emptyStack(), soldier: 1 } }
