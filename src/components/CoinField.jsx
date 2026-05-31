@@ -74,7 +74,7 @@ export default function CoinField() {
         <div
           key={i}
           data-depth={c.depth}
-          style={{ left: c.left, top: c.top, transition: 'transform 0.2s ease-out' }}
+          style={{ left: c.left, top: c.top, transition: interactive ? 'none' : 'transform 0.2s ease-out' }}
           className="absolute"
         >
           <span
