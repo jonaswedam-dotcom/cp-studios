@@ -81,14 +81,20 @@ function WarGame() {
       const spawn = pickRandomSpawn(graph, claimed, Math.random)
       if (!spawn) { showFlash('The world is full!'); return }
 
-      await supabase.from('war_players').insert({
+      const { error: pErr } = await supabase.from('war_players').insert({
         user_id: userId, display_name: userName, color, spawn_region: spawn,
         shield_until: new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
       })
-      await supabase.from('war_regions').upsert({
+      const { error: rErr } = await supabase.from('war_regions').upsert({
         region_id: spawn, country_code: graph.regions[spawn]?.country || null,
         owner_id: userId, owner_name: userName, color, is_hq: true, ...START_ARMY,
       }, { onConflict: 'region_id' })
+      if (pErr || rErr) {
+        // Don't claim success on a failed spawn; allow a retry on the next mount.
+        initRef.current = false
+        showFlash('Could not join the war — try again in a moment.')
+        return
+      }
       showFlash(`You start in ${graph.regions[spawn]?.city || spawn}!`)
     })()
   }, [loading, graph, userId, me, regions, players, userName])

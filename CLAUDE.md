@@ -107,7 +107,8 @@ Supabase SQL editor, **in numerical order**. When adding schema:
 `src/pages/WarPage.jsx` has `const COMING_SOON = false` — the full game (`WarGame`) renders.
 It is a persistent, real-world-map conquest game (MapLibre + Natural Earth admin-1 provinces):
 random-city spawn, buy soldiers/tanks/jets/warships, conquer adjacent/reachable provinces,
-build & upgrade five building types, with an overnight `pg_cron` server tick (see §4). The
+build & upgrade five building types, with a per-minute `pg_cron` server tick that advances the
+world (combat + income) even while everyone is offline (see §4). The
 pure game logic lives in testable modules under `src/war/` (`node --test src/war/*.test.js`);
 the province graph asset is built by `scripts/build-war-geo.mjs` → `public/war/provinces.*`.
 Set `COMING_SOON = true` to hide it behind a "coming soon" screen again.

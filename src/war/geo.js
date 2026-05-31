@@ -24,7 +24,7 @@ export function airReachable(id, graph, rangeKm) {
   if (!from) return []
   const out = []
   for (const [rid, r] of Object.entries(graph.regions)) {
-    if (rid === id) continue
+    if (rid === id || !r.centroid) continue
     if (distanceKm(from, r.centroid) <= rangeKm) out.push(rid)
   }
   return out
@@ -38,7 +38,7 @@ export function seaReachable(id, graph, rangeKm) {
   const from = self.centroid
   const out = []
   for (const [rid, r] of Object.entries(graph.regions)) {
-    if (rid === id || !r.coastal) continue
+    if (rid === id || !r.coastal || !r.centroid) continue
     if (distanceKm(from, r.centroid) <= rangeKm) out.push(rid)
   }
   return out
