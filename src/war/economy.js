@@ -1,9 +1,9 @@
 import { UNITS } from './units.js'
 
-export function troopCost(type, count) {
+export function troopCost(type, count, costMult = 1) {
   const u = UNITS[type]
   if (!u || count <= 0) return 0
-  return u.cost * count
+  return Math.round(u.cost * count * costMult)
 }
 
 export function maxAffordable(type, balance) {

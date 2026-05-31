@@ -36,3 +36,15 @@ test('a razor-thin attacker win still keeps at least one unit (no ghost province
   assert.equal(r.winner, 'attacker')
   assert.ok(stackTotal(r.survivors) >= 1)
 })
+
+test('bunker defenseMult lets a smaller defender win', () => {
+  // 100 atk vs 60 def, but x2 bunker -> def 120 > 100
+  const r = resolveCombat({ soldier: 100 }, { soldier: 60 }, { defenseMult: 2 })
+  assert.equal(r.winner, 'defender')
+})
+
+test('antiAir removes incoming jet strength', () => {
+  // 10 jets = 30 atk str; 0.5 anti-air removes 15 -> 15 atk vs 20 def -> defender
+  const r = resolveCombat({ jet: 10 }, { soldier: 20 }, { antiAir: 0.5 })
+  assert.equal(r.winner, 'defender')
+})

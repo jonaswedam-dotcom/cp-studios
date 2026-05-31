@@ -37,12 +37,18 @@ function ensureSurvivor(survivors, original) {
 }
 
 // attackStack invades a region held by defenseStack.
+// opts: { attackMult=1 (Lab), defenseMult=1 (Bunker), antiAir=0 (Anti-Air vs jets) }.
 // Returns { winner: 'attacker'|'defender', survivors: stack-of-winner }.
-export function resolveCombat(attackStack, defenseStack) {
+export function resolveCombat(attackStack, defenseStack, opts = {}) {
+  const { attackMult = 1, defenseMult = 1, antiAir = 0 } = opts
   const atk = { ...emptyStack(), ...attackStack }
   const def = { ...emptyStack(), ...defenseStack }
-  const aStr = stackStrength(atk)
-  const dStr = stackStrength(def)
+
+  let aStr = stackStrength(atk) * attackMult
+  // Anti-air removes a fraction of the incoming jet contribution before the clash.
+  aStr -= antiAir * (atk.jet || 0) * UNITS.jet.strength * attackMult
+  aStr = Math.max(0, aStr)
+  const dStr = stackStrength(def) * defenseMult
 
   if (aStr > dStr) {
     return { winner: 'attacker', survivors: ensureSurvivor(scaleToStrength(atk, aStr, aStr - dStr), atk) }

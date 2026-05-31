@@ -18,3 +18,8 @@ test('maxAffordable returns how many you can buy with a balance', () => {
   assert.equal(maxAffordable('tank', 1000), 2)
   assert.equal(maxAffordable('jet', 100), 0)
 })
+
+test('troopCost applies an optional cost multiplier', () => {
+  assert.equal(troopCost('soldier', 10, 0.8), 800) // 1000 * 0.8
+  assert.equal(troopCost('soldier', 10), 1000)     // default 1
+})
