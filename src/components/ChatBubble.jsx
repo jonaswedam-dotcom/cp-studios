@@ -1,8 +1,17 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { supabase } from '../supabase'
 import { useApp } from '../context/AppContext'
-import ConversationThread, { formatDateLabel, isSameDay } from './chat/ConversationThread'
+import ConversationThread, { formatDateLabel, isSameDay, buildListItems } from './chat/ConversationThread'
+import ConversationList from './chat/ConversationList'
+import NewDmPicker from './chat/NewDmPicker'
 import { BubbleIcon, ChevronLeftIcon, ChevronRightIcon, XIcon } from './chat/chatIcons'
+import {
+  listThreads,
+  getOrCreateThread,
+  fetchThreadMessages,
+  sendDirectMessage,
+  uploadDmImage,
+} from '../lib/dm'
 
 // ── localStorage key ───────────────────────────────────────
 const chatVisitKey = (uid) => `cp-studios:chat-last-visit:${uid}`
@@ -12,6 +21,7 @@ export default function ChatBubble() {
   const { currentUser, session, chatOpen, setChatOpen } = useApp()
   const userId = session?.user?.id
 
+  // ── Group chat state ───────────────────────────────────────
   const [messages,     setMessages]     = useState([])
   const [hasChatDot,   setHasChatDot]   = useState(false)
   const [text,         setText]         = useState('')
@@ -20,21 +30,24 @@ export default function ChatBubble() {
   const [sending,      setSending]      = useState(false)
   const [typingUsers,  setTypingUsers]  = useState({})
 
-  const [activeTab, setActiveTab] = useState('group')
+  // ── Tab + DM state ─────────────────────────────────────────
+  const [activeTab,      setActiveTab]      = useState('group')
+  const [threads,        setThreads]        = useState([])
+  const [activeThreadId, setActiveThreadId] = useState(null)
+  const [threadMessages, setThreadMessages] = useState({}) // { threadId: rawMessage[] }
+  const [pickerOpen,     setPickerOpen]     = useState(false)
 
-  const desktopScrollRef = useRef(null)
-  const mobileScrollRef  = useRef(null)
-  const textareaRef   = useRef(null)
-  const fileRef       = useRef(null)
-  const chatOpenRef   = useRef(chatOpen)
-  const hasLoadedRef  = useRef(false)
+  const desktopScrollRef  = useRef(null)
+  const mobileScrollRef   = useRef(null)
+  const textareaRef       = useRef(null)
+  const fileRef           = useRef(null)
+  const chatOpenRef       = useRef(chatOpen)
+  const hasLoadedRef      = useRef(false)
+  const loadedThreadsRef  = useRef(new Set())
 
   useEffect(() => { chatOpenRef.current = chatOpen }, [chatOpen])
 
   // ── Scroll helpers ─────────────────────────────────────────
-  // The desktop sidebar and mobile popup are both always mounted; only one is
-  // visible per breakpoint. Scroll whichever is laid out — the hidden one
-  // reports scrollHeight 0, so scrolling it is a harmless no-op.
   const scrollToBottom = useCallback((behavior = 'smooth') => {
     for (const el of [desktopScrollRef.current, mobileScrollRef.current]) {
       if (el && el.scrollHeight) el.scrollTo({ top: el.scrollHeight, behavior })
@@ -103,35 +116,54 @@ export default function ChatBubble() {
     }
   }, [chatOpen, userId])
 
-  // ── Pin the view to the newest messages ───────────────────
-  // Runs after the DOM commits, so scrollHeight already reflects the
-  // rendered messages — fixes opening to an older scroll position.
-  useLayoutEffect(() => {
-    if (chatOpen) scrollToBottom('instant')
-  }, [messages, chatOpen, scrollToBottom])
+  // ── Load DM threads when panel opens or Direct tab is entered ──
+  useEffect(() => {
+    if (!chatOpen || !userId || activeTab !== 'direct') return
+    listThreads().then(setThreads).catch(() => {})
+  }, [chatOpen, activeTab, userId])
 
-  // Images load after layout, growing the list and pushing the bottom
-  // down; re-pin as each one finishes so we stay on the newest message.
+  // ── Pin group view to newest messages ──────────────────────
+  useLayoutEffect(() => {
+    if (chatOpen && activeTab === 'group') scrollToBottom('instant')
+  }, [messages, chatOpen, activeTab, scrollToBottom])
+
+  // ── Pin active DM thread to bottom ────────────────────────
+  useLayoutEffect(() => {
+    if (chatOpen && activeTab === 'direct' && activeThreadId) {
+      scrollToBottom('instant')
+    }
+  }, [chatOpen, activeTab, activeThreadId, threadMessages, scrollToBottom])
+
+  // Images load after layout — re-pin as each finishes
   const handleMediaLoad = useCallback(() => {
     if (chatOpenRef.current) scrollToBottom('instant')
   }, [scrollToBottom])
 
-  // ── Typing broadcast ───────────────────────────────────────
+  // ── Typing broadcast (group only) ──────────────────────────
   const broadcastTyping = useCallback(() => {
     if (!currentUser || !userId) return
     const ch = supabase.channel('chat-bubble', { config: { broadcast: { self: false } } })
     ch.send({ type: 'broadcast', event: 'typing', payload: { userId, name: currentUser.name } })
   }, [userId, currentUser])
 
-  const handleTextChange = (e) => {
-    setText(e.target.value)
-    const el = e.target
+  // ── Shared input handlers ──────────────────────────────────
+  const resizeTextarea = (el) => {
     el.style.height = 'auto'
     el.style.height = Math.min(el.scrollHeight, 100) + 'px'
+  }
+
+  const handleTextChange = (e) => {
+    setText(e.target.value)
+    resizeTextarea(e.target)
     broadcastTyping()
   }
 
-  // ── Image picker ───────────────────────────────────────────
+  // DM-specific text handler: resize but DON'T broadcast group typing
+  const handleDmTextChange = (e) => {
+    setText(e.target.value)
+    resizeTextarea(e.target)
+  }
+
   const handleImageFile = (e) => {
     const file = e.target.files[0]
     if (!file) return
@@ -146,7 +178,7 @@ export default function ChatBubble() {
     setImagePreview(null)
   }
 
-  // ── Send ───────────────────────────────────────────────────
+  // ── Group send ─────────────────────────────────────────────
   const handleSend = async () => {
     const trimmed = text.trim()
     if (!trimmed && !imageFile) return
@@ -196,23 +228,88 @@ export default function ChatBubble() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
   }
 
-  // ── Build list items ───────────────────────────────────────
-  const listItems = []
-  messages.forEach((msg, i) => {
-    const prev = messages[i - 1]
-    if (!prev || !isSameDay(prev.created_at, msg.created_at)) {
-      listItems.push({ type: 'date', id: `date-${msg.id}`, label: formatDateLabel(msg.created_at) })
+  // ── DM: open thread ────────────────────────────────────────
+  const openThread = useCallback((threadId) => {
+    setActiveThreadId(threadId)
+    if (loadedThreadsRef.current.has(threadId)) return
+    loadedThreadsRef.current.add(threadId)
+    fetchThreadMessages(threadId)
+      .then(msgs => setThreadMessages(p => ({ ...p, [threadId]: msgs })))
+      .catch(err => { loadedThreadsRef.current.delete(threadId); console.error('fetchThreadMessages failed:', err) })
+  }, [])
+
+  // ── Tab switch: clear draft so group/DM drafts can't cross ──
+  const switchTab = (tab) => {
+    setActiveTab(tab)
+    setText('')
+    clearImage()
+    if (textareaRef.current) textareaRef.current.style.height = 'auto'
+  }
+
+  // ── DM: compose (open picker) ──────────────────────────────
+  const handleCompose = () => setPickerOpen(true)
+
+  const handlePickUser = async (pickedUserId) => {
+    try {
+      const threadId = await getOrCreateThread(pickedUserId)
+      const fresh = await listThreads()
+      setThreads(fresh)
+      openThread(threadId)
+    } catch (err) {
+      console.error('getOrCreateThread failed:', err)
     }
-    const gap      = !prev || (new Date(msg.created_at) - new Date(prev.created_at)) > 5 * 60 * 1000
-    const showName = !prev || prev.user_id !== msg.user_id || gap
-    listItems.push({ type: 'message', msg, showName })
-  })
+    setPickerOpen(false)
+  }
+
+  // ── DM send ────────────────────────────────────────────────
+  const dmSend = async () => {
+    const trimmed = text.trim()
+    if ((!trimmed && !imageFile) || sending) return
+    setSending(true)
+    try {
+      let imageUrl = null
+      if (imageFile) imageUrl = await uploadDmImage({ threadId: activeThreadId, file: imageFile })
+      const row = await sendDirectMessage({
+        threadId:   activeThreadId,
+        senderId:   userId,
+        senderName: currentUser?.name || 'Unknown',
+        content:    trimmed || null,
+        imageUrl,
+      })
+      setThreadMessages(prev => ({
+        ...prev,
+        [activeThreadId]: [
+          ...(prev[activeThreadId] || []).filter(m => m.id !== row.id),
+          row,
+        ],
+      }))
+      setText('')
+      clearImage()
+      if (textareaRef.current) textareaRef.current.style.height = 'auto'
+      listThreads().then(setThreads).catch(() => {})
+    } catch (e) {
+      console.error('DM send failed:', e)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const dmHandleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dmSend() }
+  }
+
+  // ── Build list items ───────────────────────────────────────
+  const listItems = buildListItems(messages)
 
   const typingNames = Object.values(typingUsers).map(u => u.name)
 
+  // ── Active thread's other-person name ──────────────────────
+  const activeThread = threads.find(t => t.thread_id === activeThreadId)
+  const otherName    = activeThread?.other_name || 'them'
+
   if (!currentUser) return null
 
-  const panelBodyProps = {
+  const groupPanelBodyProps = {
     messages: listItems,
     hasLoaded: hasLoadedRef.current,
     typingNames,
@@ -230,13 +327,67 @@ export default function ChatBubble() {
     userId,
   }
 
+  const dmPanelBodyProps = {
+    messages:     buildListItems(threadMessages[activeThreadId] || []),
+    hasLoaded:    !!threadMessages[activeThreadId],
+    typingNames:  [],
+    imagePreview,
+    text,
+    sending,
+    onTextChange: handleDmTextChange,
+    onKeyDown:    dmHandleKeyDown,
+    onSend:       dmSend,
+    onImageFile:  handleImageFile,
+    onClearImage: clearImage,
+    onMediaLoad:  handleMediaLoad,
+    textareaRef,
+    fileRef,
+    userId,
+    placeholder:  `Message ${otherName}…`,
+  }
+
+  // ── Direct tab body (shared between desktop & mobile) ─────
+  // Render the back-header + thread or the conversation list.
+  const renderDirectTab = (scrollRef) => {
+    if (activeThreadId) {
+      return (
+        <div className="flex flex-col flex-1 min-h-0">
+          {/* Sub-header */}
+          <div className="flex-none flex items-center gap-2 px-3 py-2 border-b border-cp-border">
+            <button
+              onClick={() => {
+                setActiveThreadId(null)
+                setText('')
+                clearImage()
+                if (textareaRef.current) textareaRef.current.style.height = 'auto'
+              }}
+              className="flex items-center gap-1 text-cp-muted hover:text-cp-text transition-colors text-[12px]"
+              aria-label="Back to conversations"
+            >
+              <ChevronLeftIcon />
+            </button>
+            <span className="text-[13px] text-cp-text font-medium truncate">{otherName}</span>
+          </div>
+          <ConversationThread {...dmPanelBodyProps} scrollRef={scrollRef} />
+        </div>
+      )
+    }
+
+    return (
+      <ConversationList
+        threads={threads}
+        activeThreadId={activeThreadId}
+        onSelect={openThread}
+        onCompose={handleCompose}
+        unreadFor={() => false}
+      />
+    )
+  }
+
   return (
     <>
       {/* ════════════════════════════════════════════════════════════
           Desktop sidebar (lg+) — fixed right panel
-          Slides in/out; collapse tab sticks out from left edge.
-          When closed, translate-x-full pushes panel off-screen
-          but the tab (-left-8) sits right at the viewport edge.
       ════════════════════════════════════════════════════════════ */}
       <div
         className={`
@@ -282,7 +433,7 @@ export default function ChatBubble() {
           {['group', 'direct'].map(tab => (
             <button
               key={tab}
-              onClick={() => setActiveTab(tab)}
+              onClick={() => switchTab(tab)}
               className={`flex-1 py-2 text-xs font-medium transition-colors ${
                 activeTab === tab
                   ? 'text-cp-text border-b-2 border-cp-accent'
@@ -296,11 +447,11 @@ export default function ChatBubble() {
 
         {/* Chat body */}
         <div className={activeTab === 'group' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
-          <ConversationThread {...panelBodyProps} scrollRef={desktopScrollRef} />
+          <ConversationThread {...groupPanelBodyProps} scrollRef={desktopScrollRef} />
         </div>
         {activeTab === 'direct' && (
-          <div className="flex-1 flex items-center justify-center text-cp-muted text-xs">
-            Direct messages — coming up
+          <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+            {renderDirectTab(desktopScrollRef)}
           </div>
         )}
       </div>
@@ -343,7 +494,7 @@ export default function ChatBubble() {
             {['group', 'direct'].map(tab => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
+                onClick={() => switchTab(tab)}
                 className={`flex-1 py-2 text-xs font-medium transition-colors ${
                   activeTab === tab
                     ? 'text-cp-text border-b-2 border-cp-accent'
@@ -356,11 +507,11 @@ export default function ChatBubble() {
           </div>
 
           <div className={activeTab === 'group' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
-            <ConversationThread {...panelBodyProps} scrollRef={mobileScrollRef} />
+            <ConversationThread {...groupPanelBodyProps} scrollRef={mobileScrollRef} />
           </div>
           {activeTab === 'direct' && (
-            <div className="flex-1 flex items-center justify-center text-cp-muted text-xs">
-              Direct messages — coming up
+            <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              {renderDirectTab(mobileScrollRef)}
             </div>
           )}
         </div>
@@ -387,6 +538,14 @@ export default function ChatBubble() {
           )}
         </button>
       </div>
+
+      {/* DM picker modal */}
+      {pickerOpen && (
+        <NewDmPicker
+          onPick={handlePickUser}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
     </>
   )
 }

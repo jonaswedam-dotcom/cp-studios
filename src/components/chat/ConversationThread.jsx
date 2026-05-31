@@ -21,6 +21,25 @@ export function isSameDay(a, b) {
          da.getDate()     === db.getDate()
 }
 
+// Build the flat list of date-separator + message items from a raw messages array.
+// Works for both group messages (user_id field) and DMs (sender_id field).
+export function buildListItems(messages) {
+  const items = []
+  messages.forEach((msg, i) => {
+    const prev = messages[i - 1]
+    if (!prev || !isSameDay(prev.created_at, msg.created_at)) {
+      items.push({ type: 'date', id: `date-${msg.id}`, label: formatDateLabel(msg.created_at) })
+    }
+    const gap      = !prev || (new Date(msg.created_at) - new Date(prev.created_at)) > 5 * 60 * 1000
+    // Group messages use user_id; DMs use sender_id — support both
+    const prevSenderId = prev?.user_id ?? prev?.sender_id
+    const curSenderId  = msg.user_id  ?? msg.sender_id
+    const showName = !prev || prevSenderId !== curSenderId || gap
+    items.push({ type: 'message', msg, showName })
+  })
+  return items
+}
+
 // ── Typing indicator ───────────────────────────────────────
 function TypingIndicator({ names }) {
   if (!names.length) return null
@@ -125,7 +144,7 @@ export default function ConversationThread({
               <MessageBubble
                 key={item.msg.id}
                 msg={item.msg}
-                isOwn={item.msg.user_id === userId}
+                isOwn={(item.msg.user_id ?? item.msg.sender_id) === userId}
                 showName={item.showName}
                 onImageLoad={onMediaLoad}
               />
