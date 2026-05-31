@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext'
 import ConversationThread, { formatDateLabel, isSameDay, buildListItems } from './chat/ConversationThread'
 import ConversationList from './chat/ConversationList'
 import NewDmPicker from './chat/NewDmPicker'
-import { BubbleIcon, ChevronLeftIcon, ChevronRightIcon, XIcon } from './chat/chatIcons'
+import { BubbleIcon, ChevronLeftIcon, ChevronRightIcon, XIcon, ExpandIcon, ShrinkIcon } from './chat/chatIcons'
 import {
   listThreads,
   getOrCreateThread,
@@ -49,6 +49,7 @@ export default function ChatBubble() {
   const [threadMessages, setThreadMessages] = useState({}) // { threadId: rawMessage[] }
   const [pickerOpen,     setPickerOpen]     = useState(false)
   const [dmTypingUsers,  setDmTypingUsers]  = useState({}) // { [threadId]: { [userId]: { name, ts } } }
+  const [expanded,       setExpanded]       = useState(false)
 
   const desktopScrollRef  = useRef(null)
   const mobileScrollRef   = useRef(null)
@@ -59,6 +60,7 @@ export default function ChatBubble() {
   const loadedThreadsRef  = useRef(new Set())
 
   useEffect(() => { chatOpenRef.current = chatOpen }, [chatOpen])
+  useEffect(() => { if (!chatOpen) setExpanded(false) }, [chatOpen])
 
   // ── Scroll helpers ─────────────────────────────────────────
   const scrollToBottom = useCallback((behavior = 'smooth') => {
@@ -182,11 +184,12 @@ export default function ChatBubble() {
     }
   }, [chatOpen, userId])
 
-  // ── Load DM threads when panel opens or Direct tab is entered ──
+  // ── Load DM threads when the Direct tab is entered or the panel is maximized ──
+  // (expanded mode always shows the DM rail, regardless of activeTab)
   useEffect(() => {
-    if (!chatOpen || !userId || activeTab !== 'direct') return
+    if (!chatOpen || !userId || (activeTab !== 'direct' && !expanded)) return
     listThreads().then(setThreads).catch(() => {})
-  }, [chatOpen, activeTab, userId])
+  }, [chatOpen, activeTab, expanded, userId])
 
   // ── Pin group view to newest messages ──────────────────────
   useLayoutEffect(() => {
@@ -194,11 +197,12 @@ export default function ChatBubble() {
   }, [messages, chatOpen, activeTab, scrollToBottom])
 
   // ── Pin active DM thread to bottom ────────────────────────
+  // Active in the Direct tab OR whenever a DM is shown in the maximized two-pane.
   useLayoutEffect(() => {
-    if (chatOpen && activeTab === 'direct' && activeThreadId) {
+    if (chatOpen && (activeTab === 'direct' || expanded) && activeThreadId) {
       scrollToBottom('instant')
     }
-  }, [chatOpen, activeTab, activeThreadId, threadMessages, scrollToBottom])
+  }, [chatOpen, activeTab, expanded, activeThreadId, threadMessages, scrollToBottom])
 
   // Images load after layout — re-pin as each finishes
   const handleMediaLoad = useCallback(() => {
@@ -375,6 +379,10 @@ export default function ChatBubble() {
 
   // ── DM combined unread ─────────────────────────────────────
   const anyDmUnread = threads.some(isThreadUnread)
+  const unreadForThread = (id) => {
+    const t = threads.find(x => x.thread_id === id)
+    return t ? isThreadUnread(t) : false
+  }
 
   // ── Build list items ───────────────────────────────────────
   const listItems = buildListItems(messages)
@@ -425,7 +433,7 @@ export default function ChatBubble() {
     placeholder:  `Message ${otherName}…`,
   }
 
-  // ── Direct tab body (shared between desktop & mobile) ─────
+  // ── Direct tab body (shared between desktop & mobile, narrow) ─────
   // Render the back-header + thread or the conversation list.
   const renderDirectTab = (scrollRef) => {
     if (activeThreadId) {
@@ -458,40 +466,44 @@ export default function ChatBubble() {
         activeThreadId={activeThreadId}
         onSelect={openThread}
         onCompose={handleCompose}
-        unreadFor={(id) => { const t = threads.find(x => x.thread_id === id); return t ? isThreadUnread(t) : false }}
+        unreadFor={unreadForThread}
       />
     )
   }
 
+  // ── DM thread only (no Back button) — used in expanded two-pane ──
+  const renderDmThread = (scrollRef) => (
+    <ConversationThread {...dmPanelBodyProps} scrollRef={scrollRef} />
+  )
+
   return (
     <>
       {/* ════════════════════════════════════════════════════════════
-          Desktop sidebar (lg+) — fixed right panel
+          Desktop sidebar (lg+) — fixed right panel / expanded overlay
       ════════════════════════════════════════════════════════════ */}
       <div
-        className={`
-          hidden lg:flex
-          fixed top-16 right-0 bottom-0 z-40
-          w-[300px] flex-col
-          bg-cp-card border-l border-cp-border
-          transition-transform duration-300 ease-in-out
-          ${chatOpen ? 'translate-x-0' : 'translate-x-full'}
-        `}
+        className={
+          expanded
+            ? 'hidden lg:flex fixed inset-0 top-16 z-40 flex-col bg-cp-card border-l border-cp-border'
+            : `hidden lg:flex fixed top-16 right-0 bottom-0 z-40 w-[300px] flex-col bg-cp-card border-l border-cp-border transition-transform duration-300 ease-in-out ${chatOpen ? 'translate-x-0' : 'translate-x-full'}`
+        }
       >
-        {/* Collapse / expand tab on the left edge */}
-        <button
-          onClick={() => setChatOpen(o => !o)}
-          aria-label={chatOpen ? 'Close chat' : 'Open chat'}
-          className="absolute -left-8 top-1/2 -translate-y-1/2 w-8 h-14
-            bg-cp-card border border-r-0 border-cp-border rounded-l-xl
-            flex flex-col items-center justify-center gap-1
-            text-cp-muted hover:text-cp-text transition-colors z-50"
-        >
-          {chatOpen ? <ChevronRightIcon /> : <ChevronLeftIcon />}
-          {!chatOpen && (hasChatDot || anyDmUnread) && (
-            <span className="w-2 h-2 rounded-full bg-red-500" />
-          )}
-        </button>
+        {/* Collapse / expand tab on the left edge — hidden when expanded */}
+        {!expanded && (
+          <button
+            onClick={() => setChatOpen(o => !o)}
+            aria-label={chatOpen ? 'Close chat' : 'Open chat'}
+            className="absolute -left-8 top-1/2 -translate-y-1/2 w-8 h-14
+              bg-cp-card border border-r-0 border-cp-border rounded-l-xl
+              flex flex-col items-center justify-center gap-1
+              text-cp-muted hover:text-cp-text transition-colors z-50"
+          >
+            {chatOpen ? <ChevronRightIcon /> : <ChevronLeftIcon />}
+            {!chatOpen && (hasChatDot || anyDmUnread) && (
+              <span className="w-2 h-2 rounded-full bg-red-500" />
+            )}
+          </button>
+        )}
 
         {/* Panel header */}
         <div className="flex-none flex items-center justify-between px-4 py-3 border-b border-cp-border bg-cp-bg/60">
@@ -499,45 +511,83 @@ export default function ChatBubble() {
             <h2 className="font-display text-sm text-cp-text font-normal leading-tight">Group Chat</h2>
             <p className="text-[10px] text-cp-muted/60 mt-0.5">Everyone in CP Studios</p>
           </div>
-          <button
-            onClick={() => setChatOpen(false)}
-            className="w-7 h-7 flex items-center justify-center rounded-lg text-cp-muted hover:text-cp-text hover:bg-cp-elevated transition-colors"
-          >
-            <XIcon />
-          </button>
-        </div>
-
-        {/* Tab bar */}
-        <div className="flex-none flex border-b border-cp-border">
-          {['group', 'direct'].map(tab => (
+          <div className="flex items-center gap-1">
             <button
-              key={tab}
-              onClick={() => switchTab(tab)}
-              className={`flex-1 py-2 text-xs font-medium transition-colors ${
-                activeTab === tab
-                  ? 'text-cp-text border-b-2 border-cp-accent'
-                  : 'text-cp-muted hover:text-cp-text'
-              }`}
+              onClick={() => setExpanded(v => !v)}
+              aria-label={expanded ? 'Restore chat' : 'Maximize chat'}
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-cp-muted hover:text-cp-text hover:bg-cp-elevated transition-colors"
             >
-              {tab === 'group' ? 'Group' : 'Direct'}
-              {tab === 'group' && hasChatDot && (
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 ml-1 align-middle" />
-              )}
-              {tab === 'direct' && anyDmUnread && (
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 ml-1 align-middle" />
-              )}
+              {expanded ? <ShrinkIcon /> : <ExpandIcon />}
             </button>
-          ))}
+            <button
+              onClick={() => setChatOpen(false)}
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-cp-muted hover:text-cp-text hover:bg-cp-elevated transition-colors"
+            >
+              <XIcon />
+            </button>
+          </div>
         </div>
 
-        {/* Chat body */}
-        <div className={activeTab === 'group' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
-          <ConversationThread {...groupPanelBodyProps} scrollRef={desktopScrollRef} />
-        </div>
-        {activeTab === 'direct' && (
-          <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-            {renderDirectTab(desktopScrollRef)}
+        {expanded ? (
+          /* ── Expanded two-pane layout ── */
+          <div className="flex-1 flex min-h-0">
+            {/* Left rail */}
+            <div className="w-72 flex-none border-r border-cp-border overflow-y-auto">
+              <ConversationList
+                threads={threads}
+                activeThreadId={activeThreadId}
+                onSelect={openThread}
+                onCompose={handleCompose}
+                unreadFor={unreadForThread}
+                showGroupRow
+                groupHasUnread={hasChatDot}
+                onSelectGroup={() => setActiveThreadId(null)}
+              />
+            </div>
+            {/* Right pane */}
+            <div className="flex-1 flex flex-col min-h-0">
+              {activeThreadId
+                ? renderDmThread(desktopScrollRef)
+                : <ConversationThread {...groupPanelBodyProps} scrollRef={desktopScrollRef} />
+              }
+            </div>
           </div>
+        ) : (
+          /* ── Normal narrow sidebar body ── */
+          <>
+            {/* Tab bar */}
+            <div className="flex-none flex border-b border-cp-border">
+              {['group', 'direct'].map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => switchTab(tab)}
+                  className={`flex-1 py-2 text-xs font-medium transition-colors ${
+                    activeTab === tab
+                      ? 'text-cp-text border-b-2 border-cp-accent'
+                      : 'text-cp-muted hover:text-cp-text'
+                  }`}
+                >
+                  {tab === 'group' ? 'Group' : 'Direct'}
+                  {tab === 'group' && hasChatDot && (
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 ml-1 align-middle" />
+                  )}
+                  {tab === 'direct' && anyDmUnread && (
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 ml-1 align-middle" />
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Chat body */}
+            <div className={activeTab === 'group' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
+              <ConversationThread {...groupPanelBodyProps} scrollRef={desktopScrollRef} />
+            </div>
+            {activeTab === 'direct' && (
+              <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                {renderDirectTab(desktopScrollRef)}
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -548,17 +598,11 @@ export default function ChatBubble() {
 
         {/* Popup */}
         <div
-          className={`
-            w-[350px] max-w-[calc(100vw-3rem)] h-[480px]
-            bg-cp-card border border-cp-border rounded-2xl
-            shadow-2xl shadow-black/60
-            flex flex-col overflow-hidden
-            transition-all duration-200 ease-out origin-bottom-right
-            ${chatOpen
-              ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto'
-              : 'opacity-0 translate-y-3 scale-95 pointer-events-none'
-            }
-          `}
+          className={
+            expanded
+              ? `fixed inset-0 z-50 w-full h-full max-w-none rounded-none flex flex-col overflow-hidden bg-cp-card border-0 pointer-events-auto ${chatOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`
+              : `w-[350px] max-w-[calc(100vw-3rem)] h-[480px] bg-cp-card border border-cp-border rounded-2xl shadow-2xl shadow-black/60 flex flex-col overflow-hidden transition-all duration-200 ease-out origin-bottom-right ${chatOpen ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto' : 'opacity-0 translate-y-3 scale-95 pointer-events-none'}`
+          }
         >
           {/* Header */}
           <div className="flex-none flex items-center justify-between px-4 py-3 border-b border-cp-border bg-cp-bg/60">
@@ -566,12 +610,21 @@ export default function ChatBubble() {
               <h2 className="font-display text-sm text-cp-text font-normal leading-tight">Group Chat</h2>
               <p className="text-[10px] text-cp-muted/60 mt-0.5">Everyone in CP Studios</p>
             </div>
-            <button
-              onClick={() => setChatOpen(false)}
-              className="w-7 h-7 flex items-center justify-center rounded-lg text-cp-muted hover:text-cp-text hover:bg-cp-elevated transition-colors"
-            >
-              <XIcon />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setExpanded(v => !v)}
+                aria-label={expanded ? 'Restore chat' : 'Maximize chat'}
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-cp-muted hover:text-cp-text hover:bg-cp-elevated transition-colors"
+              >
+                {expanded ? <ShrinkIcon /> : <ExpandIcon />}
+              </button>
+              <button
+                onClick={() => setChatOpen(false)}
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-cp-muted hover:text-cp-text hover:bg-cp-elevated transition-colors"
+              >
+                <XIcon />
+              </button>
+            </div>
           </div>
 
           {/* Tab bar */}
@@ -607,27 +660,29 @@ export default function ChatBubble() {
           )}
         </div>
 
-        {/* Floating button */}
-        <button
-          onClick={() => setChatOpen(o => !o)}
-          className={`
-            relative w-14 h-14 rounded-full
-            flex items-center justify-center
-            shadow-lg shadow-black/40
-            transition-all duration-200
-            pointer-events-auto
-            ${chatOpen
-              ? 'bg-cp-accent-hover text-cp-bg scale-95'
-              : 'bg-cp-accent hover:bg-cp-accent-hover text-cp-bg hover:scale-105'
-            }
-          `}
-          aria-label="Toggle chat"
-        >
-          <BubbleIcon />
-          {(hasChatDot || anyDmUnread) && !chatOpen && (
-            <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-red-500 ring-2 ring-cp-bg" />
-          )}
-        </button>
+        {/* Floating button — hidden when expanded (popup covers full screen) */}
+        {!expanded && (
+          <button
+            onClick={() => setChatOpen(o => !o)}
+            className={`
+              relative w-14 h-14 rounded-full
+              flex items-center justify-center
+              shadow-lg shadow-black/40
+              transition-all duration-200
+              pointer-events-auto
+              ${chatOpen
+                ? 'bg-cp-accent-hover text-cp-bg scale-95'
+                : 'bg-cp-accent hover:bg-cp-accent-hover text-cp-bg hover:scale-105'
+              }
+            `}
+            aria-label="Toggle chat"
+          >
+            <BubbleIcon />
+            {(hasChatDot || anyDmUnread) && !chatOpen && (
+              <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-red-500 ring-2 ring-cp-bg" />
+            )}
+          </button>
+        )}
       </div>
 
       {/* DM picker modal */}
