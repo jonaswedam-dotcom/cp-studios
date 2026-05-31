@@ -11,10 +11,8 @@ import MoveUnitsModal from '../war/MoveUnitsModal.jsx'
 import BuildingsModal from '../war/BuildingsModal.jsx'
 import { UNITS, UNIT_TYPES, START_ARMY, formatDuration } from '../war/units.js'
 import { troopCost } from '../war/economy.js'
-import { stackStrength, stackTotal, resolveCombat, emptyStack, stackFromRow } from '../war/combat.js'
-import { costMultiplier, defenseMultiplier, antiAirFactor, strengthMultiplier, buildingCost, SLOTS_PER_REGION } from '../war/buildings.js'
-import { neutralGarrison } from '../war/neutral.js'
-import { lootFraction, lootCoins } from '../war/spoils.js'
+import { emptyStack } from '../war/combat.js'
+import { costMultiplier, strengthMultiplier, buildingCost, SLOTS_PER_REGION } from '../war/buildings.js'
 import { landNeighbors, airReachable, seaReachable } from '../war/geo.js'
 import { pickRandomSpawn } from '../war/spawn.js'
 
@@ -45,7 +43,7 @@ function WarComingSoon() {
 
 function WarGame() {
   const { session } = useApp()
-  const { balance, adjustBalance } = useCasino()
+  const { balance, adjustBalance, loadBalance } = useCasino()
   const userId   = session?.user?.id
   const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || 'Player'
 
@@ -83,7 +81,10 @@ function WarGame() {
       const spawn = pickRandomSpawn(graph, claimed, Math.random)
       if (!spawn) { showFlash('The world is full!'); return }
 
-      await supabase.from('war_players').insert({ user_id: userId, display_name: userName, color, spawn_region: spawn })
+      await supabase.from('war_players').insert({
+        user_id: userId, display_name: userName, color, spawn_region: spawn,
+        shield_until: new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
+      })
       await supabase.from('war_regions').upsert({
         region_id: spawn, country_code: graph.regions[spawn]?.country || null,
         owner_id: userId, owner_name: userName, color, is_hq: true, ...START_ARMY,
@@ -173,75 +174,20 @@ function WarGame() {
     } finally { setBusy(false) }
   }, [busy, buildFor, balance, regions, userId, adjustBalance])
 
-  // ── Resolve arrived movements (client poll; Phase 3 moves this server-side) ──
-  const resolveMovements = useCallback(async () => {
-    const now = Date.now()
-    const due = movements.filter((m) => m.status === 'moving' && new Date(m.arrives_at).getTime() <= now)
-    for (const mv of due) {
-      const { data: claimed } = await supabase.from('war_movements')
-        .update({ status: 'arrived' }).eq('id', mv.id).eq('status', 'moving').select('id')
-      if (!claimed || claimed.length === 0) continue // another client already resolved it
-      const dest = regions[mv.to_region]
-      const player = players.find((p) => p.user_id === mv.player_id)
-      const incoming = { ...emptyStack(), [mv.unit_type]: mv.count }
-
-      if (!dest || !dest.owner_id) {
-        // Unclaimed: must beat the neutral garrison to take it.
-        const garrison = neutralGarrison(mv.to_region)
-        const r = resolveCombat(incoming, garrison, {
-          attackMult: strengthMultiplier(buildings.filter((b) => b.owner_id === mv.player_id)),
-        })
-        if (r.winner === 'attacker') {
-          await supabase.from('war_regions').upsert({
-            region_id: mv.to_region, country_code: graph?.regions[mv.to_region]?.country || null,
-            owner_id: mv.player_id, owner_name: player?.display_name || 'Player', color: player?.color || '#888',
-            is_hq: false, ...r.survivors, updated_at: new Date().toISOString(),
-          }, { onConflict: 'region_id' })
-        }
-        // If the attack failed, the units are simply lost (garrison held).
-      } else if (dest.owner_id === mv.player_id) {
-        await supabase.from('war_regions')
-          .update({ [mv.unit_type]: (dest[mv.unit_type] || 0) + mv.count, updated_at: new Date().toISOString() })
-          .eq('region_id', mv.to_region)
-      } else {
-        // Enemy province.
-        const defBuildings = buildings.filter((b) => b.region_id === mv.to_region)
-        const defense = stackFromRow(dest)
-        const defStrength = stackStrength(defense) * defenseMultiplier(defBuildings)
-        const r = resolveCombat(incoming, defense, {
-          attackMult: strengthMultiplier(buildings.filter((b) => b.owner_id === mv.player_id)),
-          defenseMult: defenseMultiplier(defBuildings),
-          antiAir: antiAirFactor(defBuildings),
-        })
-        if (r.winner === 'attacker') {
-          // Spoils: loot coins (credited only on the attacker's own client) + downgrade captured buildings.
-          if (mv.player_id === userId) {
-            const frac = lootFraction(stackTotal(defense), stackTotal(defense)) // full kill on capture
-            const loot = lootCoins(frac, defStrength)
-            if (loot > 0) { await adjustBalance(loot); showFlash(`Conquered + looted ${loot.toLocaleString()} coins`) }
-          }
-          // Downgrade/transfer the captured province's buildings (loser keeps a remnant of value).
-          for (const b of defBuildings) {
-            if (b.level <= 1) await supabase.from('war_buildings').delete().eq('id', b.id)
-            else await supabase.from('war_buildings').update({ level: b.level - 1, owner_id: mv.player_id }).eq('id', b.id)
-          }
-          await supabase.from('war_regions').update({
-            owner_id: mv.player_id, owner_name: player?.display_name || 'Player', color: player?.color || '#888',
-            is_hq: false, ...r.survivors, updated_at: new Date().toISOString(),
-          }).eq('region_id', mv.to_region)
-        } else {
-          await supabase.from('war_regions')
-            .update({ ...r.survivors, updated_at: new Date().toISOString() })
-            .eq('region_id', mv.to_region)
-        }
-      }
-    }
-  }, [movements, regions, players, graph, buildings, userId, adjustBalance])
-
+  // ── Collect accrued income into the wallet on load + every 60s (also stamps activity) ──
+  // Combat + movement resolution is now server-authoritative (the pg_cron war_tick()).
   useEffect(() => {
-    const id = setInterval(resolveMovements, 4000)
-    return () => clearInterval(id)
-  }, [resolveMovements])
+    if (!userId) return
+    let alive = true
+    const collect = async () => {
+      const { data, error } = await supabase.rpc('war_collect_income')
+      if (!alive || error) return
+      if (data && data > 0) { showFlash(`+${data.toLocaleString()} coins (income)`); loadBalance() }
+    }
+    collect()
+    const id = setInterval(collect, 60000)
+    return () => { alive = false; clearInterval(id) }
+  }, [userId, loadBalance])
 
   // ── Province click: select own → open move modal on second click ────────────
   const onRegionClick = useCallback((regionId) => {
@@ -260,10 +206,13 @@ function WarGame() {
     const hasJet  = (src.jet || 0) > 0
     const hasSea  = (src.warship || 0) > 0
     const canReach = (reachableLand.includes(regionId) && hasLand) || (reachableAir.includes(regionId) && hasJet) || (reachableSea.includes(regionId) && hasSea)
+    const targetShielded = row?.owner_id && row.owner_id !== userId &&
+      players.some((p) => p.user_id === row.owner_id && p.shield_until && new Date(p.shield_until) > new Date())
+    if (canReach && targetShielded) { showFlash("That player is shielded — you can't attack yet."); return }
     if (canReach) { setMoveFrom(selected); return }
     if (row?.owner_id === userId) setSelected(regionId)
     else setSelected(null)
-  }, [selected, regions, userId, graph])
+  }, [selected, regions, userId, graph, players])
 
   const leaderboard = players
     .map((p) => ({ ...p, regionCount: Object.values(regions).filter((r) => r.owner_id === p.user_id).length }))
