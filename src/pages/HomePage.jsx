@@ -35,6 +35,20 @@ function SwordIcon() {
 }
 
 // ── Hooks ──────────────────────────────────────────────────
+// Tracks the user's reduced-motion preference, updating if it changes.
+function useReducedMotion() {
+  const [reduced, setReduced] = useState(
+    () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  )
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const onChange = (e) => setReduced(e.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  return reduced
+}
+
 // Fire `onEnter` once when the ref element scrolls into view.
 function useInView(onEnter, threshold = 0.25) {
   const ref = useRef(null)
@@ -75,10 +89,10 @@ function useVisible(threshold = 0.15) {
 
 // Animate from 0 to `target` over `duration` ms once `active` is true.
 function useCountUp(target, active, duration = 1500) {
+  const reduced = useReducedMotion()
   const [value, setValue] = useState(0)
   useEffect(() => {
     if (!active || target == null) return
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     if (reduced) { setValue(target); return }
     let raf = 0
     const start = performance.now()
@@ -91,7 +105,7 @@ function useCountUp(target, active, duration = 1500) {
     }
     raf = requestAnimationFrame(step)
     return () => cancelAnimationFrame(raf)
-  }, [target, active, duration])
+  }, [target, active, duration, reduced])
   return value
 }
 
@@ -99,9 +113,7 @@ function useCountUp(target, active, duration = 1500) {
 // Children fade + slide up when they enter the viewport.
 function Reveal({ children, className = '', delay = 0 }) {
   const [ref, visible] = useVisible()
-  const reduced = typeof window !== 'undefined'
-    ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    : false
+  const reduced = useReducedMotion()
 
   return (
     <div
@@ -136,7 +148,7 @@ function LoopStage({ icon, step, title, desc, accentClass = 'text-amber-400' }) 
   )
 }
 
-// Animated arrow connector between loop stages — shows a traveling coin pip on hover.
+// Static chevron connector between loop stages.
 function LoopArrow() {
   return (
     <div className="hidden md:flex items-center justify-center px-1 self-center" aria-hidden="true">
@@ -159,14 +171,14 @@ function LoopArrow() {
 }
 
 // ── Stat tile ──────────────────────────────────────────────
-function Stat({ value, label, loading, prefix = '' }) {
+function Stat({ value, label, loading }) {
   return (
     <div className="text-center px-4">
       <p className="font-display text-3xl md:text-4xl text-amber-400 tabular-nums leading-none">
         {loading ? (
           <span className="inline-block w-16 h-8 rounded-md bg-cp-elevated animate-pulse align-middle" />
         ) : (
-          `${prefix}${value.toLocaleString()}`
+          value.toLocaleString()
         )}
       </p>
       <p className="text-[10px] uppercase tracking-[0.16em] text-cp-muted mt-2.5">{label}</p>
@@ -275,7 +287,7 @@ export default function HomePage() {
       </section>
 
       {/* ── The Loop ── */}
-      <section className="max-w-5xl mx-auto px-6 py-24">
+      <section id="how-it-works" className="max-w-5xl mx-auto px-6 py-24">
         <Reveal className="text-center mb-14">
           <p className="text-[11px] uppercase tracking-[0.18em] text-cp-accent mb-3">How it works</p>
           <h2 className="font-display text-3xl md:text-4xl text-cp-text">One simple loop</h2>
@@ -348,7 +360,7 @@ export default function HomePage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           <Reveal delay={0}>
             <SectionCard
-              anchor="#top"
+              anchor="#how-it-works"
               eyebrow="Earn"
               title="Free coins"
               desc="Rack up coins through ads and surveys — your stake costs you nothing. The more you earn, the more you can risk."
