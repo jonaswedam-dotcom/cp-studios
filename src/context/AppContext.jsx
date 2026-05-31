@@ -168,11 +168,6 @@ export function AppProvider({ children }) {
     // onAuthStateChange will fire and update `session`
   }
 
-  // ── Profile list helpers ───────────────────────────────────
-  const addProfileToList = (rawRow) => {
-    setProfiles(prev => [...prev, normalizeProfile(rawRow)])
-  }
-
   return (
     <AppContext.Provider
       value={{
@@ -181,7 +176,6 @@ export function AppProvider({ children }) {
         currentUser,
         profiles,
         loadProfiles,
-        addProfileToList,
         login,
         signup,
         logout,
