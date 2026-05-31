@@ -36,6 +36,7 @@ export default function ChatBubble() {
   const [activeThreadId, setActiveThreadId] = useState(null)
   const [threadMessages, setThreadMessages] = useState({}) // { threadId: rawMessage[] }
   const [pickerOpen,     setPickerOpen]     = useState(false)
+  const [dmTypingUsers,  setDmTypingUsers]  = useState({}) // { [threadId]: { [userId]: { name, ts } } }
 
   const desktopScrollRef  = useRef(null)
   const mobileScrollRef   = useRef(null)
@@ -85,6 +86,44 @@ export default function ChatBubble() {
     return () => supabase.removeChannel(channel)
   }, [userId, scrollToBottom])
 
+  // ── Per-user DM message subscription ──────────────────────
+  // Relies on Realtime applying direct_messages SELECT RLS so we only receive
+  // rows from our own threads. Verify with a two-account test before trusting.
+  useEffect(() => {
+    if (!userId) return
+    const ch = supabase
+      .channel(`dm-user-${userId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'direct_messages' },
+        ({ new: row }) => {
+          if (row.sender_id === userId) return // our own send is already optimistic
+          setThreadMessages(prev => {
+            const existing = prev[row.thread_id]
+            if (!existing) return prev // thread not loaded; list refresh updates preview
+            if (existing.some(m => m.id === row.id)) return prev
+            return { ...prev, [row.thread_id]: [...existing, row] }
+          })
+          listThreads().then(setThreads).catch(() => {})
+        })
+      .subscribe()
+    return () => supabase.removeChannel(ch)
+  }, [userId])
+
+  // ── DM typing subscription (per active thread) ─────────────
+  useEffect(() => {
+    if (!activeThreadId || !userId) return
+    const ch = supabase
+      .channel(`dm-typing-${activeThreadId}`, { config: { broadcast: { self: false } } })
+      .on('broadcast', { event: 'typing' }, ({ payload }) => {
+        if (payload.userId === userId) return
+        setDmTypingUsers(prev => ({
+          ...prev,
+          [activeThreadId]: { ...(prev[activeThreadId] || {}), [payload.userId]: { name: payload.name, ts: Date.now() } },
+        }))
+      })
+      .subscribe()
+    return () => supabase.removeChannel(ch)
+  }, [activeThreadId, userId])
+
   // ── Expire stale typing indicators ────────────────────────
   useEffect(() => {
     const id = setInterval(() => {
@@ -95,6 +134,21 @@ export default function ChatBubble() {
         Object.keys(next).forEach(uid => {
           if (now - next[uid].ts > 3000) { delete next[uid]; changed = true }
         })
+        return changed ? next : prev
+      })
+      setDmTypingUsers(prev => {
+        const now = Date.now()
+        let changed = false
+        const next = {}
+        for (const [threadId, users] of Object.entries(prev)) {
+          const filtered = {}
+          for (const [uid, entry] of Object.entries(users)) {
+            if (now - entry.ts <= 3000) filtered[uid] = entry
+            else changed = true
+          }
+          if (Object.keys(filtered).length > 0) next[threadId] = filtered
+          else changed = true
+        }
         return changed ? next : prev
       })
     }, 1000)
@@ -146,6 +200,13 @@ export default function ChatBubble() {
     ch.send({ type: 'broadcast', event: 'typing', payload: { userId, name: currentUser.name } })
   }, [userId, currentUser])
 
+  // ── Typing broadcast (DM, per active thread) ───────────────
+  const broadcastDmTyping = useCallback(() => {
+    if (!currentUser || !userId || !activeThreadId) return
+    const ch = supabase.channel(`dm-typing-${activeThreadId}`, { config: { broadcast: { self: false } } })
+    ch.send({ type: 'broadcast', event: 'typing', payload: { userId, name: currentUser.name } })
+  }, [userId, currentUser, activeThreadId])
+
   // ── Shared input handlers ──────────────────────────────────
   const resizeTextarea = (el) => {
     el.style.height = 'auto'
@@ -158,10 +219,11 @@ export default function ChatBubble() {
     broadcastTyping()
   }
 
-  // DM-specific text handler: resize but DON'T broadcast group typing
+  // DM-specific text handler: resize + broadcast DM typing (NOT group typing)
   const handleDmTextChange = (e) => {
     setText(e.target.value)
     resizeTextarea(e.target)
+    broadcastDmTyping()
   }
 
   const handleImageFile = (e) => {
@@ -301,7 +363,8 @@ export default function ChatBubble() {
   // ── Build list items ───────────────────────────────────────
   const listItems = buildListItems(messages)
 
-  const typingNames = Object.values(typingUsers).map(u => u.name)
+  const typingNames   = Object.values(typingUsers).map(u => u.name)
+  const dmTypingNames = Object.values(dmTypingUsers[activeThreadId] || {}).map(u => u.name)
 
   // ── Active thread's other-person name ──────────────────────
   const activeThread = threads.find(t => t.thread_id === activeThreadId)
@@ -330,7 +393,7 @@ export default function ChatBubble() {
   const dmPanelBodyProps = {
     messages:     buildListItems(threadMessages[activeThreadId] || []),
     hasLoaded:    !!threadMessages[activeThreadId],
-    typingNames:  [],
+    typingNames:  dmTypingNames,
     imagePreview,
     text,
     sending,
