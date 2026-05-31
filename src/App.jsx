@@ -5,8 +5,6 @@ import Navbar from './components/Navbar'
 import ChatBubble from './components/ChatBubble'
 import LoginPage from './pages/LoginPage'
 import HomePage from './pages/HomePage'
-import ProfilePage from './pages/ProfilePage'
-import CreateProfilePage from './pages/CreateProfilePage'
 import AdminPage from './pages/AdminPage'
 import CasinoPage from './pages/CasinoPage'
 import CoinFlipGame from './pages/casino/CoinFlipGame'
@@ -70,18 +68,6 @@ function AppRoutes() {
       <Route path="/" element={
         <ProtectedRoute>
           <WithNav><HomePage /></WithNav>
-        </ProtectedRoute>
-      } />
-
-      <Route path="/profile/:id" element={
-        <ProtectedRoute>
-          <WithNav><ProfilePage /></WithNav>
-        </ProtectedRoute>
-      } />
-
-      <Route path="/create" element={
-        <ProtectedRoute>
-          <WithNav><CreateProfilePage /></WithNav>
         </ProtectedRoute>
       } />
 
