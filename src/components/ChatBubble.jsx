@@ -1,259 +1,39 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { supabase } from '../supabase'
 import { useApp } from '../context/AppContext'
+import ConversationThread, { formatDateLabel, isSameDay, buildListItems } from './chat/ConversationThread'
+import ConversationList from './chat/ConversationList'
+import NewDmPicker from './chat/NewDmPicker'
+import { BubbleIcon, ChevronLeftIcon, ChevronRightIcon, XIcon, ExpandIcon, ShrinkIcon } from './chat/chatIcons'
+import {
+  listThreads,
+  getOrCreateThread,
+  fetchThreadMessages,
+  sendDirectMessage,
+  uploadDmImage,
+} from '../lib/dm'
 
-// ── localStorage key ───────────────────────────────────────
+// ── localStorage keys ──────────────────────────────────────
 const chatVisitKey = (uid) => `cp-studios:chat-last-visit:${uid}`
-
-// ── Helpers ────────────────────────────────────────────────
-function formatTime(ts) {
-  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
-
-function formatDateLabel(ts) {
-  const d   = new Date(ts)
-  const now = new Date()
-  const diffDays = Math.floor((now.setHours(0,0,0,0) - d.setHours(0,0,0,0)) / 86400000)
-  if (diffDays === 0) return 'Today'
-  if (diffDays === 1) return 'Yesterday'
-  return new Date(ts).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })
-}
-
-function isSameDay(a, b) {
-  const da = new Date(a), db = new Date(b)
-  return da.getFullYear() === db.getFullYear() &&
-         da.getMonth()    === db.getMonth()    &&
-         da.getDate()     === db.getDate()
-}
-
-// ── Icons ──────────────────────────────────────────────────
-function BubbleIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-    </svg>
-  )
-}
-
-function ChevronLeftIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-      <polyline points="15 18 9 12 15 6" />
-    </svg>
-  )
-}
-
-function ChevronRightIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-      <polyline points="9 18 15 12 9 6" />
-    </svg>
-  )
-}
-
-function XIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="w-4 h-4">
-      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-    </svg>
-  )
-}
-
-function ImageIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4.5 h-4.5">
-      <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
-      <polyline points="21 15 16 10 5 21"/>
-    </svg>
-  )
-}
-
-function SendIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-      <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
-    </svg>
-  )
-}
-
-function RemoveIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="w-3 h-3">
-      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-    </svg>
-  )
-}
-
-// ── Typing indicator ───────────────────────────────────────
-function TypingIndicator({ names }) {
-  if (!names.length) return null
-  const label = names.length === 1
-    ? `${names[0]} is typing`
-    : names.length === 2
-    ? `${names[0]} and ${names[1]} are typing`
-    : 'Several people are typing'
-  return (
-    <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] text-cp-muted/70">
-      <span className="flex gap-0.5 items-end h-3">
-        {[0,1,2].map(i => (
-          <span
-            key={i}
-            className="w-1 h-1 rounded-full bg-cp-muted/50 animate-bounce"
-            style={{ animationDelay: `${i * 0.15}s`, animationDuration: '1s' }}
-          />
-        ))}
-      </span>
-      <span>{label}…</span>
-    </div>
-  )
-}
-
-// ── Date separator ─────────────────────────────────────────
-function DateSeparator({ label }) {
-  return (
-    <div className="flex items-center gap-2 my-3">
-      <div className="flex-1 h-px bg-cp-border" />
-      <span className="text-[10px] text-cp-muted/50 whitespace-nowrap">{label}</span>
-      <div className="flex-1 h-px bg-cp-border" />
-    </div>
-  )
-}
-
-// ── Message bubble ─────────────────────────────────────────
-function MessageBubble({ msg, isOwn, showName }) {
-  return (
-    <div className={`flex flex-col gap-0.5 max-w-[80%] ${isOwn ? 'items-end self-end' : 'items-start self-start'}`}>
-      {showName && !isOwn && (
-        <span className="text-[10px] text-cp-muted px-1 font-medium">{msg.sender_name}</span>
-      )}
-      {msg.image_url && (
-        <div className={`overflow-hidden rounded-xl border border-cp-border ${isOwn ? 'rounded-br-sm' : 'rounded-bl-sm'}`}>
-          <img
-            src={msg.image_url}
-            alt="shared"
-            className="max-w-[220px] max-h-48 object-cover block"
-          />
-        </div>
-      )}
-      {msg.content && (
-        <div className={`
-          px-3 py-2 rounded-xl text-[13px] leading-relaxed
-          ${isOwn
-            ? 'bg-cp-accent text-cp-bg rounded-br-sm'
-            : 'bg-cp-elevated border border-cp-border text-cp-text rounded-bl-sm'
-          }
-        `}>
-          {msg.content}
-        </div>
-      )}
-      <span className="text-[9px] text-cp-muted/40 px-1">{formatTime(msg.created_at)}</span>
-    </div>
-  )
-}
-
-// ── Chat panel body (shared between desktop sidebar and mobile popup) ──────────
-function ChatPanelBody({
-  messages, hasLoaded, typingNames, imagePreview,
-  text, sending,
-  onTextChange, onKeyDown, onSend, onImageFile, onClearImage,
-  scrollRef, textareaRef, fileRef,
-  userId,
-}) {
-  return (
-    <>
-      {/* Messages */}
-      <div
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-1 scroll-smooth"
-      >
-        {!hasLoaded ? (
-          <div className="flex items-center justify-center flex-1">
-            <div className="w-4 h-4 border-2 border-cp-accent border-t-transparent rounded-full animate-spin" />
-          </div>
-        ) : messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center flex-1 gap-2 text-center py-8">
-            <div className="w-10 h-10 rounded-full bg-cp-elevated border border-cp-border flex items-center justify-center">
-              <BubbleIcon />
-            </div>
-            <p className="text-cp-muted text-xs mt-1">No messages yet.</p>
-            <p className="text-cp-muted/50 text-[11px]">Be the first to say hello!</p>
-          </div>
-        ) : (
-          messages.map((item, i) =>
-            item.type === 'date' ? (
-              <DateSeparator key={item.id} label={item.label} />
-            ) : (
-              <MessageBubble
-                key={item.msg.id}
-                msg={item.msg}
-                isOwn={item.msg.user_id === userId}
-                showName={item.showName}
-              />
-            )
-          )
-        )}
-      </div>
-
-      <TypingIndicator names={typingNames} />
-
-      {/* Image preview */}
-      {imagePreview && (
-        <div className="flex-none px-3 pb-1">
-          <div className="relative inline-block">
-            <img src={imagePreview} alt="preview" className="h-14 w-14 object-cover rounded-lg border border-cp-border" />
-            <button
-              onClick={onClearImage}
-              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-cp-card border border-cp-border flex items-center justify-center text-cp-muted hover:text-red-400 transition-colors"
-            >
-              <RemoveIcon />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Input bar */}
-      <div className="flex-none border-t border-cp-border bg-cp-bg/40 px-3 py-2.5">
-        <div className="flex items-end gap-1.5 bg-cp-elevated border border-cp-border rounded-xl px-2.5 py-1.5">
-          <button
-            onClick={() => fileRef.current?.click()}
-            className="flex-none w-7 h-7 flex items-center justify-center text-cp-muted hover:text-cp-accent transition-colors mb-0.5"
-          >
-            <ImageIcon />
-          </button>
-          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onImageFile} />
-
-          <textarea
-            ref={textareaRef}
-            rows={1}
-            value={text}
-            onChange={onTextChange}
-            onKeyDown={onKeyDown}
-            placeholder="Message everyone…"
-            className="flex-1 bg-transparent text-cp-text text-[13px] placeholder-cp-muted/40 resize-none outline-none leading-relaxed py-1 min-h-[1.75rem] max-h-[6rem]"
-          />
-
-          <button
-            onClick={onSend}
-            disabled={sending || (!text.trim() && !imagePreview)}
-            className="flex-none w-7 h-7 rounded-lg bg-cp-accent hover:bg-cp-accent-hover flex items-center justify-center text-cp-bg transition-colors mb-0.5 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {sending
-              ? <span className="w-3 h-3 border-2 border-cp-bg/40 border-t-cp-bg rounded-full animate-spin" />
-              : <SendIcon />
-            }
-          </button>
-        </div>
-        <p className="text-[9px] text-cp-muted/30 text-center mt-1.5">Enter to send · Shift+Enter for new line</p>
-      </div>
-    </>
-  )
-}
+const dmVisitKey   = (uid, threadId) => `cp-studios:dm-last-visit:${uid}:${threadId}`
 
 // ── Main ChatBubble ────────────────────────────────────────
 export default function ChatBubble() {
   const { currentUser, session, chatOpen, setChatOpen } = useApp()
   const userId = session?.user?.id
 
+  // ── DM unread helpers ──────────────────────────────────────
+  const markDmRead = (threadId) => {
+    if (userId) localStorage.setItem(dmVisitKey(userId, threadId), new Date().toISOString())
+  }
+  const isThreadUnread = (t) => {
+    if (!userId || !t?.last_message_at) return false
+    if (t.last_sender_id === userId) return false
+    const seen = localStorage.getItem(dmVisitKey(userId, t.thread_id))
+    return new Date(t.last_message_at).getTime() > (seen ? new Date(seen).getTime() : 0)
+  }
+
+  // ── Group chat state ───────────────────────────────────────
   const [messages,     setMessages]     = useState([])
   const [hasChatDot,   setHasChatDot]   = useState(false)
   const [text,         setText]         = useState('')
@@ -262,19 +42,31 @@ export default function ChatBubble() {
   const [sending,      setSending]      = useState(false)
   const [typingUsers,  setTypingUsers]  = useState({})
 
-  const scrollRef     = useRef(null)
-  const textareaRef   = useRef(null)
-  const fileRef       = useRef(null)
-  const chatOpenRef   = useRef(chatOpen)
-  const hasLoadedRef  = useRef(false)
+  // ── Tab + DM state ─────────────────────────────────────────
+  const [activeTab,      setActiveTab]      = useState('group')
+  const [threads,        setThreads]        = useState([])
+  const [activeThreadId, setActiveThreadId] = useState(null)
+  const [threadMessages, setThreadMessages] = useState({}) // { threadId: rawMessage[] }
+  const [pickerOpen,     setPickerOpen]     = useState(false)
+  const [dmTypingUsers,  setDmTypingUsers]  = useState({}) // { [threadId]: { [userId]: { name, ts } } }
+  const [expanded,       setExpanded]       = useState(false)
+
+  const desktopScrollRef  = useRef(null)
+  const mobileScrollRef   = useRef(null)
+  const textareaRef       = useRef(null)
+  const fileRef           = useRef(null)
+  const chatOpenRef       = useRef(chatOpen)
+  const hasLoadedRef      = useRef(false)
+  const loadedThreadsRef  = useRef(new Set())
 
   useEffect(() => { chatOpenRef.current = chatOpen }, [chatOpen])
+  useEffect(() => { if (!chatOpen) setExpanded(false) }, [chatOpen])
 
   // ── Scroll helpers ─────────────────────────────────────────
   const scrollToBottom = useCallback((behavior = 'smooth') => {
-    const el = scrollRef.current
-    if (!el) return
-    el.scrollTo({ top: el.scrollHeight, behavior })
+    for (const el of [desktopScrollRef.current, mobileScrollRef.current]) {
+      if (el && el.scrollHeight) el.scrollTo({ top: el.scrollHeight, behavior })
+    }
   }, [])
 
   // ── Initial dot check ──────────────────────────────────────
@@ -308,6 +100,44 @@ export default function ChatBubble() {
     return () => supabase.removeChannel(channel)
   }, [userId, scrollToBottom])
 
+  // ── Per-user DM message subscription ──────────────────────
+  // Relies on Realtime applying direct_messages SELECT RLS so we only receive
+  // rows from our own threads. Verify with a two-account test before trusting.
+  useEffect(() => {
+    if (!userId) return
+    const ch = supabase
+      .channel(`dm-user-${userId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'direct_messages' },
+        ({ new: row }) => {
+          if (row.sender_id === userId) return // our own send is already optimistic
+          setThreadMessages(prev => {
+            const existing = prev[row.thread_id]
+            if (!existing) return prev // thread not loaded; list refresh updates preview
+            if (existing.some(m => m.id === row.id)) return prev
+            return { ...prev, [row.thread_id]: [...existing, row] }
+          })
+          listThreads().then(setThreads).catch(() => {})
+        })
+      .subscribe()
+    return () => supabase.removeChannel(ch)
+  }, [userId])
+
+  // ── DM typing subscription (per active thread) ─────────────
+  useEffect(() => {
+    if (!activeThreadId || !userId) return
+    const ch = supabase
+      .channel(`dm-typing-${activeThreadId}`, { config: { broadcast: { self: false } } })
+      .on('broadcast', { event: 'typing' }, ({ payload }) => {
+        if (payload.userId === userId) return
+        setDmTypingUsers(prev => ({
+          ...prev,
+          [activeThreadId]: { ...(prev[activeThreadId] || {}), [payload.userId]: { name: payload.name, ts: Date.now() } },
+        }))
+      })
+      .subscribe()
+    return () => supabase.removeChannel(ch)
+  }, [activeThreadId, userId])
+
   // ── Expire stale typing indicators ────────────────────────
   useEffect(() => {
     const id = setInterval(() => {
@@ -318,6 +148,21 @@ export default function ChatBubble() {
         Object.keys(next).forEach(uid => {
           if (now - next[uid].ts > 3000) { delete next[uid]; changed = true }
         })
+        return changed ? next : prev
+      })
+      setDmTypingUsers(prev => {
+        const now = Date.now()
+        let changed = false
+        const next = {}
+        for (const [threadId, users] of Object.entries(prev)) {
+          const filtered = {}
+          for (const [uid, entry] of Object.entries(users)) {
+            if (now - entry.ts <= 3000) filtered[uid] = entry
+            else changed = true
+          }
+          if (Object.keys(filtered).length > 0) next[threadId] = filtered
+          else changed = true
+        }
         return changed ? next : prev
       })
     }, 1000)
@@ -335,31 +180,68 @@ export default function ChatBubble() {
         .from('messages')
         .select('*')
         .order('created_at', { ascending: true })
-        .then(({ data }) => {
-          setMessages(data || [])
-          requestAnimationFrame(() => scrollToBottom('instant'))
-        })
-    } else {
-      requestAnimationFrame(() => scrollToBottom('instant'))
+        .then(({ data }) => setMessages(data || []))
     }
-  }, [chatOpen, userId, scrollToBottom])
+  }, [chatOpen, userId])
 
-  // ── Typing broadcast ───────────────────────────────────────
+  // ── Load DM threads when the Direct tab is entered or the panel is maximized ──
+  // (expanded mode always shows the DM rail, regardless of activeTab)
+  useEffect(() => {
+    if (!chatOpen || !userId || (activeTab !== 'direct' && !expanded)) return
+    listThreads().then(setThreads).catch(() => {})
+  }, [chatOpen, activeTab, expanded, userId])
+
+  // ── Pin group view to newest messages ──────────────────────
+  useLayoutEffect(() => {
+    if (chatOpen && activeTab === 'group') scrollToBottom('instant')
+  }, [messages, chatOpen, activeTab, scrollToBottom])
+
+  // ── Pin active DM thread to bottom ────────────────────────
+  // Active in the Direct tab OR whenever a DM is shown in the maximized two-pane.
+  useLayoutEffect(() => {
+    if (chatOpen && (activeTab === 'direct' || expanded) && activeThreadId) {
+      scrollToBottom('instant')
+    }
+  }, [chatOpen, activeTab, expanded, activeThreadId, threadMessages, scrollToBottom])
+
+  // Images load after layout — re-pin as each finishes
+  const handleMediaLoad = useCallback(() => {
+    if (chatOpenRef.current) scrollToBottom('instant')
+  }, [scrollToBottom])
+
+  // ── Typing broadcast (group only) ──────────────────────────
   const broadcastTyping = useCallback(() => {
     if (!currentUser || !userId) return
     const ch = supabase.channel('chat-bubble', { config: { broadcast: { self: false } } })
     ch.send({ type: 'broadcast', event: 'typing', payload: { userId, name: currentUser.name } })
   }, [userId, currentUser])
 
-  const handleTextChange = (e) => {
-    setText(e.target.value)
-    const el = e.target
+  // ── Typing broadcast (DM, per active thread) ───────────────
+  const broadcastDmTyping = useCallback(() => {
+    if (!currentUser || !userId || !activeThreadId) return
+    const ch = supabase.channel(`dm-typing-${activeThreadId}`, { config: { broadcast: { self: false } } })
+    ch.send({ type: 'broadcast', event: 'typing', payload: { userId, name: currentUser.name } })
+  }, [userId, currentUser, activeThreadId])
+
+  // ── Shared input handlers ──────────────────────────────────
+  const resizeTextarea = (el) => {
     el.style.height = 'auto'
     el.style.height = Math.min(el.scrollHeight, 100) + 'px'
+  }
+
+  const handleTextChange = (e) => {
+    setText(e.target.value)
+    resizeTextarea(e.target)
     broadcastTyping()
   }
 
-  // ── Image picker ───────────────────────────────────────────
+  // DM-specific text handler: resize + broadcast DM typing (NOT group typing)
+  const handleDmTextChange = (e) => {
+    setText(e.target.value)
+    resizeTextarea(e.target)
+    broadcastDmTyping()
+  }
+
   const handleImageFile = (e) => {
     const file = e.target.files[0]
     if (!file) return
@@ -374,7 +256,7 @@ export default function ChatBubble() {
     setImagePreview(null)
   }
 
-  // ── Send ───────────────────────────────────────────────────
+  // ── Group send ─────────────────────────────────────────────
   const handleSend = async () => {
     const trimmed = text.trim()
     if (!trimmed && !imageFile) return
@@ -424,23 +306,97 @@ export default function ChatBubble() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
   }
 
-  // ── Build list items ───────────────────────────────────────
-  const listItems = []
-  messages.forEach((msg, i) => {
-    const prev = messages[i - 1]
-    if (!prev || !isSameDay(prev.created_at, msg.created_at)) {
-      listItems.push({ type: 'date', id: `date-${msg.id}`, label: formatDateLabel(msg.created_at) })
-    }
-    const gap      = !prev || (new Date(msg.created_at) - new Date(prev.created_at)) > 5 * 60 * 1000
-    const showName = !prev || prev.user_id !== msg.user_id || gap
-    listItems.push({ type: 'message', msg, showName })
-  })
+  // ── DM: open thread ────────────────────────────────────────
+  const openThread = useCallback((threadId) => {
+    setActiveThreadId(threadId)
+    markDmRead(threadId)
+    if (loadedThreadsRef.current.has(threadId)) return
+    loadedThreadsRef.current.add(threadId)
+    fetchThreadMessages(threadId)
+      .then(msgs => setThreadMessages(p => ({ ...p, [threadId]: msgs })))
+      .catch(err => { loadedThreadsRef.current.delete(threadId); console.error('fetchThreadMessages failed:', err) })
+  }, [userId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const typingNames = Object.values(typingUsers).map(u => u.name)
+  // ── Tab switch: clear draft so group/DM drafts can't cross ──
+  const switchTab = (tab) => {
+    setActiveTab(tab)
+    setText('')
+    clearImage()
+    if (textareaRef.current) textareaRef.current.style.height = 'auto'
+  }
+
+  // ── DM: compose (open picker) ──────────────────────────────
+  const handleCompose = () => setPickerOpen(true)
+
+  const handlePickUser = async (pickedUserId) => {
+    try {
+      const threadId = await getOrCreateThread(pickedUserId)
+      const fresh = await listThreads()
+      setThreads(fresh)
+      openThread(threadId)
+    } catch (err) {
+      console.error('getOrCreateThread failed:', err)
+    }
+    setPickerOpen(false)
+  }
+
+  // ── DM send ────────────────────────────────────────────────
+  const dmSend = async () => {
+    const trimmed = text.trim()
+    if ((!trimmed && !imageFile) || sending) return
+    setSending(true)
+    try {
+      let imageUrl = null
+      if (imageFile) imageUrl = await uploadDmImage({ threadId: activeThreadId, file: imageFile })
+      const row = await sendDirectMessage({
+        threadId:   activeThreadId,
+        senderId:   userId,
+        senderName: currentUser?.name || 'Unknown',
+        content:    trimmed || null,
+        imageUrl,
+      })
+      setThreadMessages(prev => ({
+        ...prev,
+        [activeThreadId]: [
+          ...(prev[activeThreadId] || []).filter(m => m.id !== row.id),
+          row,
+        ],
+      }))
+      setText('')
+      clearImage()
+      if (textareaRef.current) textareaRef.current.style.height = 'auto'
+      listThreads().then(setThreads).catch(() => {})
+    } catch (e) {
+      console.error('DM send failed:', e)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const dmHandleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dmSend() }
+  }
+
+  // ── DM combined unread ─────────────────────────────────────
+  const anyDmUnread = threads.some(isThreadUnread)
+  const unreadForThread = (id) => {
+    const t = threads.find(x => x.thread_id === id)
+    return t ? isThreadUnread(t) : false
+  }
+
+  // ── Build list items ───────────────────────────────────────
+  const listItems = buildListItems(messages)
+
+  const typingNames   = Object.values(typingUsers).map(u => u.name)
+  const dmTypingNames = Object.values(dmTypingUsers[activeThreadId] || {}).map(u => u.name)
+
+  // ── Active thread's other-person name ──────────────────────
+  const activeThread = threads.find(t => t.thread_id === activeThreadId)
+  const otherName    = activeThread?.other_name || 'them'
 
   if (!currentUser) return null
 
-  const panelBodyProps = {
+  const groupPanelBodyProps = {
     messages: listItems,
     hasLoaded: hasLoadedRef.current,
     typingNames,
@@ -452,44 +408,102 @@ export default function ChatBubble() {
     onSend:       handleSend,
     onImageFile:  handleImageFile,
     onClearImage: clearImage,
-    scrollRef,
+    onMediaLoad:  handleMediaLoad,
     textareaRef,
     fileRef,
     userId,
   }
 
+  const dmPanelBodyProps = {
+    messages:     buildListItems(threadMessages[activeThreadId] || []),
+    hasLoaded:    !!threadMessages[activeThreadId],
+    typingNames:  dmTypingNames,
+    imagePreview,
+    text,
+    sending,
+    onTextChange: handleDmTextChange,
+    onKeyDown:    dmHandleKeyDown,
+    onSend:       dmSend,
+    onImageFile:  handleImageFile,
+    onClearImage: clearImage,
+    onMediaLoad:  handleMediaLoad,
+    textareaRef,
+    fileRef,
+    userId,
+    placeholder:  `Message ${otherName}…`,
+  }
+
+  // ── Direct tab body (shared between desktop & mobile, narrow) ─────
+  // Render the back-header + thread or the conversation list.
+  const renderDirectTab = (scrollRef) => {
+    if (activeThreadId) {
+      return (
+        <div className="flex flex-col flex-1 min-h-0">
+          {/* Sub-header */}
+          <div className="flex-none flex items-center gap-2 px-3 py-2 border-b border-cp-border">
+            <button
+              onClick={() => {
+                setActiveThreadId(null)
+                setText('')
+                clearImage()
+                if (textareaRef.current) textareaRef.current.style.height = 'auto'
+              }}
+              className="flex items-center gap-1 text-cp-muted hover:text-cp-text transition-colors text-[12px]"
+              aria-label="Back to conversations"
+            >
+              <ChevronLeftIcon />
+            </button>
+            <span className="text-[13px] text-cp-text font-medium truncate">{otherName}</span>
+          </div>
+          <ConversationThread {...dmPanelBodyProps} scrollRef={scrollRef} />
+        </div>
+      )
+    }
+
+    return (
+      <ConversationList
+        threads={threads}
+        activeThreadId={activeThreadId}
+        onSelect={openThread}
+        onCompose={handleCompose}
+        unreadFor={unreadForThread}
+      />
+    )
+  }
+
+  // ── DM thread only (no Back button) — used in expanded two-pane ──
+  const renderDmThread = (scrollRef) => (
+    <ConversationThread {...dmPanelBodyProps} scrollRef={scrollRef} />
+  )
+
   return (
     <>
       {/* ════════════════════════════════════════════════════════════
-          Desktop sidebar (lg+) — fixed right panel
-          Slides in/out; collapse tab sticks out from left edge.
-          When closed, translate-x-full pushes panel off-screen
-          but the tab (-left-8) sits right at the viewport edge.
+          Desktop sidebar (lg+) — fixed right panel / expanded overlay
       ════════════════════════════════════════════════════════════ */}
       <div
-        className={`
-          hidden lg:flex
-          fixed top-16 right-0 bottom-0 z-40
-          w-[300px] flex-col
-          bg-cp-card border-l border-cp-border
-          transition-transform duration-300 ease-in-out
-          ${chatOpen ? 'translate-x-0' : 'translate-x-full'}
-        `}
+        className={
+          expanded
+            ? 'hidden lg:flex fixed inset-0 top-16 z-40 flex-col bg-cp-card border-l border-cp-border'
+            : `hidden lg:flex fixed top-16 right-0 bottom-0 z-40 w-[300px] flex-col bg-cp-card border-l border-cp-border transition-transform duration-300 ease-in-out ${chatOpen ? 'translate-x-0' : 'translate-x-full'}`
+        }
       >
-        {/* Collapse / expand tab on the left edge */}
-        <button
-          onClick={() => setChatOpen(o => !o)}
-          aria-label={chatOpen ? 'Close chat' : 'Open chat'}
-          className="absolute -left-8 top-1/2 -translate-y-1/2 w-8 h-14
-            bg-cp-card border border-r-0 border-cp-border rounded-l-xl
-            flex flex-col items-center justify-center gap-1
-            text-cp-muted hover:text-cp-text transition-colors z-50"
-        >
-          {chatOpen ? <ChevronRightIcon /> : <ChevronLeftIcon />}
-          {!chatOpen && hasChatDot && (
-            <span className="w-2 h-2 rounded-full bg-red-500" />
-          )}
-        </button>
+        {/* Collapse / expand tab on the left edge — hidden when expanded */}
+        {!expanded && (
+          <button
+            onClick={() => setChatOpen(o => !o)}
+            aria-label={chatOpen ? 'Close chat' : 'Open chat'}
+            className="absolute -left-8 top-1/2 -translate-y-1/2 w-8 h-14
+              bg-cp-card border border-r-0 border-cp-border rounded-l-xl
+              flex flex-col items-center justify-center gap-1
+              text-cp-muted hover:text-cp-text transition-colors z-50"
+          >
+            {chatOpen ? <ChevronRightIcon /> : <ChevronLeftIcon />}
+            {!chatOpen && (hasChatDot || anyDmUnread) && (
+              <span className="w-2 h-2 rounded-full bg-red-500" />
+            )}
+          </button>
+        )}
 
         {/* Panel header */}
         <div className="flex-none flex items-center justify-between px-4 py-3 border-b border-cp-border bg-cp-bg/60">
@@ -497,16 +511,84 @@ export default function ChatBubble() {
             <h2 className="font-display text-sm text-cp-text font-normal leading-tight">Group Chat</h2>
             <p className="text-[10px] text-cp-muted/60 mt-0.5">Everyone in CP Studios</p>
           </div>
-          <button
-            onClick={() => setChatOpen(false)}
-            className="w-7 h-7 flex items-center justify-center rounded-lg text-cp-muted hover:text-cp-text hover:bg-cp-elevated transition-colors"
-          >
-            <XIcon />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setExpanded(v => !v)}
+              aria-label={expanded ? 'Restore chat' : 'Maximize chat'}
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-cp-muted hover:text-cp-text hover:bg-cp-elevated transition-colors"
+            >
+              {expanded ? <ShrinkIcon /> : <ExpandIcon />}
+            </button>
+            <button
+              onClick={() => setChatOpen(false)}
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-cp-muted hover:text-cp-text hover:bg-cp-elevated transition-colors"
+            >
+              <XIcon />
+            </button>
+          </div>
         </div>
 
-        {/* Chat body */}
-        <ChatPanelBody {...panelBodyProps} />
+        {expanded ? (
+          /* ── Expanded two-pane layout ── */
+          <div className="flex-1 flex min-h-0">
+            {/* Left rail */}
+            <div className="w-72 flex-none border-r border-cp-border overflow-y-auto">
+              <ConversationList
+                threads={threads}
+                activeThreadId={activeThreadId}
+                onSelect={openThread}
+                onCompose={handleCompose}
+                unreadFor={unreadForThread}
+                showGroupRow
+                groupHasUnread={hasChatDot}
+                onSelectGroup={() => setActiveThreadId(null)}
+              />
+            </div>
+            {/* Right pane */}
+            <div className="flex-1 flex flex-col min-h-0">
+              {activeThreadId
+                ? renderDmThread(desktopScrollRef)
+                : <ConversationThread {...groupPanelBodyProps} scrollRef={desktopScrollRef} />
+              }
+            </div>
+          </div>
+        ) : (
+          /* ── Normal narrow sidebar body ── */
+          <>
+            {/* Tab bar */}
+            <div className="flex-none flex border-b border-cp-border">
+              {['group', 'direct'].map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => switchTab(tab)}
+                  className={`flex-1 py-2 text-xs font-medium transition-colors ${
+                    activeTab === tab
+                      ? 'text-cp-text border-b-2 border-cp-accent'
+                      : 'text-cp-muted hover:text-cp-text'
+                  }`}
+                >
+                  {tab === 'group' ? 'Group' : 'Direct'}
+                  {tab === 'group' && hasChatDot && (
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 ml-1 align-middle" />
+                  )}
+                  {tab === 'direct' && anyDmUnread && (
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 ml-1 align-middle" />
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Chat body */}
+            <div className={activeTab === 'group' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
+              <ConversationThread {...groupPanelBodyProps} scrollRef={desktopScrollRef} />
+            </div>
+            {activeTab === 'direct' && (
+              <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                {renderDirectTab(desktopScrollRef)}
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       {/* ════════════════════════════════════════════════════════════
@@ -516,17 +598,11 @@ export default function ChatBubble() {
 
         {/* Popup */}
         <div
-          className={`
-            w-[350px] max-w-[calc(100vw-3rem)] h-[480px]
-            bg-cp-card border border-cp-border rounded-2xl
-            shadow-2xl shadow-black/60
-            flex flex-col overflow-hidden
-            transition-all duration-200 ease-out origin-bottom-right
-            ${chatOpen
-              ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto'
-              : 'opacity-0 translate-y-3 scale-95 pointer-events-none'
-            }
-          `}
+          className={
+            expanded
+              ? `fixed inset-0 z-50 w-full h-full max-w-none rounded-none flex flex-col overflow-hidden bg-cp-card border-0 pointer-events-auto ${chatOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`
+              : `w-[350px] max-w-[calc(100vw-3rem)] h-[480px] bg-cp-card border border-cp-border rounded-2xl shadow-2xl shadow-black/60 flex flex-col overflow-hidden transition-all duration-200 ease-out origin-bottom-right ${chatOpen ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto' : 'opacity-0 translate-y-3 scale-95 pointer-events-none'}`
+          }
         >
           {/* Header */}
           <div className="flex-none flex items-center justify-between px-4 py-3 border-b border-cp-border bg-cp-bg/60">
@@ -534,39 +610,88 @@ export default function ChatBubble() {
               <h2 className="font-display text-sm text-cp-text font-normal leading-tight">Group Chat</h2>
               <p className="text-[10px] text-cp-muted/60 mt-0.5">Everyone in CP Studios</p>
             </div>
-            <button
-              onClick={() => setChatOpen(false)}
-              className="w-7 h-7 flex items-center justify-center rounded-lg text-cp-muted hover:text-cp-text hover:bg-cp-elevated transition-colors"
-            >
-              <XIcon />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setExpanded(v => !v)}
+                aria-label={expanded ? 'Restore chat' : 'Maximize chat'}
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-cp-muted hover:text-cp-text hover:bg-cp-elevated transition-colors"
+              >
+                {expanded ? <ShrinkIcon /> : <ExpandIcon />}
+              </button>
+              <button
+                onClick={() => setChatOpen(false)}
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-cp-muted hover:text-cp-text hover:bg-cp-elevated transition-colors"
+              >
+                <XIcon />
+              </button>
+            </div>
           </div>
 
-          <ChatPanelBody {...panelBodyProps} />
+          {/* Tab bar */}
+          <div className="flex-none flex border-b border-cp-border">
+            {['group', 'direct'].map(tab => (
+              <button
+                key={tab}
+                onClick={() => switchTab(tab)}
+                className={`flex-1 py-2 text-xs font-medium transition-colors ${
+                  activeTab === tab
+                    ? 'text-cp-text border-b-2 border-cp-accent'
+                    : 'text-cp-muted hover:text-cp-text'
+                }`}
+              >
+                {tab === 'group' ? 'Group' : 'Direct'}
+                {tab === 'group' && hasChatDot && (
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 ml-1 align-middle" />
+                )}
+                {tab === 'direct' && anyDmUnread && (
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 ml-1 align-middle" />
+                )}
+              </button>
+            ))}
+          </div>
+
+          <div className={activeTab === 'group' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
+            <ConversationThread {...groupPanelBodyProps} scrollRef={mobileScrollRef} />
+          </div>
+          {activeTab === 'direct' && (
+            <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              {renderDirectTab(mobileScrollRef)}
+            </div>
+          )}
         </div>
 
-        {/* Floating button */}
-        <button
-          onClick={() => setChatOpen(o => !o)}
-          className={`
-            relative w-14 h-14 rounded-full
-            flex items-center justify-center
-            shadow-lg shadow-black/40
-            transition-all duration-200
-            pointer-events-auto
-            ${chatOpen
-              ? 'bg-cp-accent-hover text-cp-bg scale-95'
-              : 'bg-cp-accent hover:bg-cp-accent-hover text-cp-bg hover:scale-105'
-            }
-          `}
-          aria-label="Toggle chat"
-        >
-          <BubbleIcon />
-          {hasChatDot && !chatOpen && (
-            <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-red-500 ring-2 ring-cp-bg" />
-          )}
-        </button>
+        {/* Floating button — hidden when expanded (popup covers full screen) */}
+        {!expanded && (
+          <button
+            onClick={() => setChatOpen(o => !o)}
+            className={`
+              relative w-14 h-14 rounded-full
+              flex items-center justify-center
+              shadow-lg shadow-black/40
+              transition-all duration-200
+              pointer-events-auto
+              ${chatOpen
+                ? 'bg-cp-accent-hover text-cp-bg scale-95'
+                : 'bg-cp-accent hover:bg-cp-accent-hover text-cp-bg hover:scale-105'
+              }
+            `}
+            aria-label="Toggle chat"
+          >
+            <BubbleIcon />
+            {(hasChatDot || anyDmUnread) && !chatOpen && (
+              <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-red-500 ring-2 ring-cp-bg" />
+            )}
+          </button>
+        )}
       </div>
+
+      {/* DM picker modal */}
+      {pickerOpen && (
+        <NewDmPicker
+          onPick={handlePickUser}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
     </>
   )
 }

@@ -11,7 +11,7 @@ policies, and the setup steps.
 > [Security limitations & known gaps](#security-limitations--known-gaps).
 
 All schema is defined in [`../supabase/migrations/`](../supabase/migrations/) as numbered SQL
-files (`001`–`016`). There is no migration runner — run them by hand in the Supabase
+files (`001`–`018`). There is no migration runner — run them by hand in the Supabase
 **SQL Editor**, in order.
 
 ---
@@ -20,7 +20,7 @@ files (`001`–`016`). There is no migration runner — run them by hand in the 
 
 1. Create a Supabase project; copy the Project URL and anon key into `.env.local`
    (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`).
-2. Run migrations `001` → `016` in order in the SQL Editor.
+2. Run migrations `001` → `018` in order in the SQL Editor.
 3. Confirm the public storage bucket `cp-studios` exists (migration `001` creates it).
 4. Enable **Realtime** on the tables that need it (some are enabled in SQL, others must be
    toggled in **Database → Replication**):
@@ -161,6 +161,54 @@ In-flight troop movements: from/to coords, `troop_count`, `status`
 insert/update only their own (`auth.uid() = player_id`). Movement resolution is polled and
 applied client-side.
 
+### Direct messages (migration `018`)
+
+#### `dm_threads`
+One row per unique pair of users. `user_lo` / `user_hi` are the two participants stored in
+ascending UUID order (`user_lo < user_hi`), enforced by a `CHECK` constraint. This ordering
+guarantee means there is exactly one thread per pair and no duplicates.
+
+| Column           | Type        | Notes                                              |
+|------------------|-------------|----------------------------------------------------|
+| `id`             | uuid PK     | default `gen_random_uuid()`                        |
+| `user_lo`        | uuid        | FK → `auth.users` (`on delete cascade`)            |
+| `user_hi`        | uuid        | FK → `auth.users` (`on delete cascade`)            |
+| `created_at`     | timestamptz | default `now()`                                    |
+| `last_message_at`| timestamptz | bumped automatically by trigger on every new message|
+
+Unique constraint: `(user_lo, user_hi)`. Threads are never created directly by the client —
+use the `get_or_create_dm_thread` RPC.
+
+RLS: a participant (`auth.uid() = user_lo or auth.uid() = user_hi`) can `select` their own
+threads. No client insert/update/delete — thread creation is handled server-side by the RPC.
+
+#### `direct_messages`
+Individual messages within a thread.
+
+| Column        | Type        | Notes                                                      |
+|---------------|-------------|------------------------------------------------------------|
+| `id`          | uuid PK     | default `gen_random_uuid()`                                |
+| `thread_id`   | uuid        | FK → `dm_threads` (`on delete cascade`)                    |
+| `sender_id`   | uuid        | FK → `auth.users` (`on delete cascade`)                    |
+| `sender_name` | text        | denormalized display name at send time; default `''`       |
+| `content`     | text        | message body; nullable if `image_url` is set               |
+| `image_url`   | text        | public Storage URL; nullable if `content` is set           |
+| `created_at`  | timestamptz | default `now()`                                            |
+
+`CHECK` constraint: at least one of `content` or `image_url` must be non-null.
+
+Index: `(thread_id, created_at)` for efficient pagination within a thread.
+
+RLS (both policies use the `auth.uid()` expression form — not `TO authenticated USING (true)`):
+- **select** — participant can read: `exists(select 1 from dm_threads t where t.id = direct_messages.thread_id and (auth.uid() = t.user_lo or auth.uid() = t.user_hi))`.
+- **insert** — participant can send: same `exists(...)` check plus `sender_id = auth.uid()`.
+
+#### `trg_bump_dm_thread` trigger
+`AFTER INSERT ON direct_messages FOR EACH ROW` — calls the `bump_dm_thread_last_message`
+`SECURITY DEFINER` function, which updates `dm_threads.last_message_at` to the new message's
+`created_at`. This keeps the thread list sorted by recency without requiring a client-side
+update.
+
 ---
 
 ## RPC functions
@@ -178,6 +226,25 @@ Called from the **Send Coins** modal via `supabase.rpc('donate_coins', ...)`.
 Introduced in `011` to join wallets+profiles for names, then **dropped in `012`** once
 `display_name` was denormalized onto `wallets`. Do not reintroduce a profiles join for names.
 
+### `get_or_create_dm_thread(other_user_id uuid) → uuid`  (migration `018`)
+Finds or creates the canonical `dm_threads` row for the caller and `other_user_id`. Computes
+`user_lo`/`user_hi` from `least`/`greatest`, does an `INSERT … ON CONFLICT DO NOTHING`, then
+returns the thread `id`. Raises exceptions for unauthenticated callers or an invalid/self
+recipient. Returns: the thread UUID.
+
+### `list_dm_threads() → table`  (migration `018`)
+Returns the caller's threads ordered by `last_message_at desc`, each enriched with the other
+participant's display name and avatar (read from `auth.users.raw_user_meta_data`) and a
+last-message preview. Return columns: `thread_id`, `other_user_id`, `other_name`,
+`other_avatar`, `last_content`, `last_image_url`, `last_sender_id`, `last_message_at`.
+Reads `auth.users` directly (needs `SECURITY DEFINER`).
+
+### `list_dm_recipients() → table`  (migration `018`)
+Returns all users other than the caller who are either approved in `pending_users` or whose
+email matches the hardcoded admin addresses. Intended for the compose/new-thread picker.
+Return columns: `user_id`, `full_name`, `avatar_url`. Reads `auth.users` and `pending_users`
+(needs `SECURITY DEFINER`).
+
 ---
 
 ## Storage
@@ -190,10 +257,16 @@ images. Conventional path prefixes:
 | `avatars/<userId>/`         | Profile/user avatars             |
 | `photos/<profileId>/`       | Gallery photos                   |
 | `chat/<userId>/`            | Images shared in group chat      |
+| `dm/<threadId>/`            | Images sent in DM threads        |
 
 Storage policies: authenticated users can upload/update/delete objects in the bucket; reads
 are public. `src/lib/storage.js#getStoragePath()` converts a public URL back into the bucket
 path so the client can delete the underlying file when a photo/profile is removed.
+
+> **DM images:** images attached to direct messages are stored under `dm/<threadId>/…` in the
+> same public bucket. Because the bucket is fully public, anyone who knows (or guesses) the URL
+> can fetch the image — there is no per-object access control. This is an accepted trade-off for
+> this trusted, friends-and-family app.
 
 > ⚠️ The update/delete policies are named "own objects" but contain **no per-object owner
 > check** — any authenticated user can overwrite or delete *any* file in the bucket, and uploads
@@ -258,3 +331,5 @@ behaviour and would need fixing before this app could be exposed to untrusted us
 | `014_wallets_select_all.sql`           | Fix wallets read policy (expression form)                      |
 | `015_cp_war.sql`                       | CP War: `war_players`, `war_tiles`, `war_movements`            |
 | `016_reset_balances.sql`               | One-off: reset all balances to 1000                            |
+| `017_security_hardening.sql`           | RLS hardening pass (see security review)                       |
+| `018_direct_messages.sql`              | `dm_threads`, `direct_messages`, RLS, trigger, 3 RPCs, realtime|

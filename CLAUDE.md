@@ -151,7 +151,9 @@ enforced behaviour.
 
 | Channel name        | Where            | Purpose                                            |
 |---------------------|------------------|----------------------------------------------------|
-| `chat-bubble`       | `ChatBubble.jsx` | New messages + typing-indicator broadcasts         |
+| `chat-bubble`       | `ChatBubble.jsx` | Group: new messages + typing-indicator broadcasts  |
+| `dm-user-<uid>`     | `ChatBubble.jsx` | Per-user stream of incoming DMs (RLS-scoped)        |
+| `dm-typing-<tid>`   | `ChatBubble.jsx` | Per-thread DM typing-indicator broadcasts          |
 | `navbar-pending`    | `Navbar.jsx`     | Admin's "new signup request" notification dot       |
 | `profile-rt-<id>`   | `ProfilePage`    | Live likes/comments on the open profile            |
 | `war-rt`            | `WarPage.jsx`    | Tiles / players / movements sync for CP War         |
