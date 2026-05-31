@@ -131,17 +131,30 @@ function WarGame() {
     try {
       const src = regions[moveFrom]
       if (!src || src.owner_id !== userId || (src[type] || 0) < count) { showFlash('Move no longer valid.'); return }
+      const destRow = regions[dest]
+      const destShielded = destRow?.owner_id && destRow.owner_id !== userId &&
+        players.some((p) => p.user_id === destRow.owner_id && p.shield_until && new Date(p.shield_until) > new Date())
+      if (destShielded) { showFlash("That player is shielded — you can't attack yet."); return }
       const mode = UNITS[type].mode
       const arrivesAt = new Date(Date.now() + UNITS[type].travelSeconds * 1000).toISOString()
-      await supabase.from('war_regions')
+      // Decrement the source, then create the movement. If the movement insert fails,
+      // restore the source count so the in-transit units aren't silently destroyed.
+      const { error: decErr } = await supabase.from('war_regions')
         .update({ [type]: (src[type] || 0) - count, updated_at: new Date().toISOString() })
         .eq('region_id', moveFrom)
-      await supabase.from('war_movements').insert({
+      if (decErr) { showFlash('Move failed.'); return }
+      const { error: mvErr } = await supabase.from('war_movements').insert({
         player_id: userId, from_region: moveFrom, to_region: dest, unit_type: type, count, mode, arrives_at: arrivesAt,
       })
+      if (mvErr) {
+        await supabase.from('war_regions')
+          .update({ [type]: (src[type] || 0), updated_at: new Date().toISOString() })
+          .eq('region_id', moveFrom)
+        showFlash('Move failed.'); return
+      }
       showFlash(`${count} ${UNITS[type].label}s en route — arrives in ${formatDuration(UNITS[type].travelSeconds)}`)
     } finally { setMoveFrom(null); setSelected(null); setBusy(false) }
-  }, [busy, moveFrom, regions, userId])
+  }, [busy, moveFrom, regions, userId, players])
 
   // ── Build / upgrade buildings on an owned province ──────────────────────────
   const handleBuild = useCallback(async (type) => {
@@ -244,7 +257,7 @@ function WarGame() {
         </div>
       )}
       {eliminated && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 max-w-sm w-full mx-4 px-5 py-4 bg-red-900/80 border border-red-500/40 rounded-2xl text-center shadow-2xl backdrop-blur-sm">
+        <div className="fixed top-36 left-1/2 -translate-x-1/2 z-50 max-w-sm w-full mx-4 px-5 py-4 bg-red-900/80 border border-red-500/40 rounded-2xl text-center shadow-2xl backdrop-blur-sm">
           <p className="text-white font-semibold text-sm mb-1">💀 You have no provinces left!</p>
           <button onClick={() => setShowBuy(true)} className="mt-2 px-4 py-2 bg-red-500 hover:bg-red-400 text-white text-xs font-semibold rounded-xl transition-colors">Buy units to respawn</button>
         </div>

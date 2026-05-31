@@ -46,36 +46,49 @@ export function useWarData(userId) {
   // Realtime
   useEffect(() => {
     if (!userId) return
+    // On DELETE, payload.new is {} and payload.old carries the PK — so always read the
+    // affected row from payload.old for deletes (otherwise tick-deleted rows, e.g. a
+    // captured level-1 building, would linger in local state until the next full reload).
     const ch = supabase.channel('war-rt-v2')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'war_regions' }, payload => {
-        const row = payload.new || payload.old
-        if (!row) return
+        const isDelete = payload.eventType === 'DELETE'
+        const row = isDelete ? payload.old : payload.new
+        if (!row?.region_id) return
         setRegions(prev => {
           const next = { ...prev }
-          if (payload.eventType === 'DELETE') delete next[row.region_id]
-          else next[payload.new.region_id] = payload.new
+          if (isDelete) delete next[row.region_id]
+          else next[row.region_id] = row
           return next
         })
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'war_players' }, payload => {
+        const isDelete = payload.eventType === 'DELETE'
+        const row = isDelete ? payload.old : payload.new
+        const id = row?.user_id
+        if (!id) return
         setPlayers(prev => {
-          const id = (payload.new || payload.old)?.user_id
           const filtered = prev.filter(p => p.user_id !== id)
-          return payload.eventType === 'DELETE' ? filtered : [...filtered, payload.new]
+          return isDelete ? filtered : [...filtered, row]
         })
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'war_movements' }, payload => {
-        const m = payload.new || payload.old
+        const isDelete = payload.eventType === 'DELETE'
+        const row = isDelete ? payload.old : payload.new
+        const id = row?.id
+        if (!id) return
         setMovements(prev => {
-          const filtered = prev.filter(x => x.id !== m?.id)
-          return payload.new?.status === 'moving' ? [...filtered, payload.new] : filtered
+          const filtered = prev.filter(x => x.id !== id)
+          return (!isDelete && row.status === 'moving') ? [...filtered, row] : filtered
         })
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'war_buildings' }, payload => {
-        const b = payload.new || payload.old
+        const isDelete = payload.eventType === 'DELETE'
+        const row = isDelete ? payload.old : payload.new
+        const id = row?.id
+        if (!id) return
         setBuildings(prev => {
-          const filtered = prev.filter(x => x.id !== b?.id)
-          return payload.eventType === 'DELETE' ? filtered : [...filtered, payload.new]
+          const filtered = prev.filter(x => x.id !== id)
+          return isDelete ? filtered : [...filtered, row]
         })
       })
       .subscribe()

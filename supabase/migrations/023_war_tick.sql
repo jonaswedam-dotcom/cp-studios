@@ -157,20 +157,33 @@ begin
     end if;
   end loop;
 
-  -- 2) Accrue capped income into each player's vault (cap ≈ 10h of bank income).
-  --    Never reduce an existing vault if banks were lost (greatest(vault, cap)).
+  -- 2) Accrue capped income into each player's vault (50 coins/bank-level/hour, cap ≈ 10h).
+  --    The tick runs every minute, so accrual per tick is fractional. We floor to whole
+  --    coins and advance last_income_at only by the time those whole coins represent,
+  --    carrying the sub-coin remainder forward (bumping it to now() every tick would
+  --    discard the remainder and stall low-bank income — e.g. 1 bank level would earn 0
+  --    forever). Players with no banks have last_income_at kept at now() so that building
+  --    a bank later doesn't pay out retroactive back-income. cap = greatest(vault, 10h)
+  --    so losing all banks never wipes an already-accrued vault.
+  with bank as (
+    select p.user_id, p.vault, p.last_income_at,
+           coalesce((select sum(level) from public.war_buildings b
+                     where b.owner_id = p.user_id and b.type = 'bank'), 0) as lv
+    from public.war_players p
+  ), calc as (
+    select user_id, vault, last_income_at, lv,
+           floor(lv * 50 * greatest(0, extract(epoch from (now() - last_income_at)) / 3600.0))::int as accrued,
+           lv * 50 * 10 as cap
+    from bank
+  )
   update public.war_players p set
-    vault = least(
-      p.vault + floor(
-        (select coalesce(sum(level), 0) from public.war_buildings b where b.owner_id = p.user_id and b.type = 'bank')
-        * 50 * greatest(0, extract(epoch from (now() - p.last_income_at)) / 3600.0)
-      ),
-      greatest(
-        p.vault,
-        (select coalesce(sum(level), 0) from public.war_buildings b where b.owner_id = p.user_id and b.type = 'bank') * 50 * 10
-      )
-    )::int,
-    last_income_at = now();
+    vault = least(p.vault + c.accrued, greatest(p.vault, c.cap))::int,
+    last_income_at = case
+      when c.lv = 0      then now()
+      when c.accrued > 0 then p.last_income_at + (c.accrued::numeric / (c.lv * 50)) * interval '1 hour'
+      else p.last_income_at
+    end
+  from calc c where c.user_id = p.user_id;
 
   -- 3) Refresh alive flag (no regions left = not alive, can respawn by buying).
   update public.war_players p set

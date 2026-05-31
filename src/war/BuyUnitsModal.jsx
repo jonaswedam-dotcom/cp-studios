@@ -25,7 +25,7 @@ export default function BuyUnitsModal({ balance, costMult = 1, onConfirm, onClos
               }`}>
               <UnitIcon type={t} className="w-5 h-5" />
               <span>{UNITS[t].label}</span>
-              <span className="text-amber-400/80">{UNITS[t].cost}</span>
+              <span className="text-amber-400/80">{Math.round(UNITS[t].cost * costMult)}</span>
             </button>
           ))}
         </div>

@@ -16,12 +16,19 @@ drop policy if exists "war_regions_update" on public.war_regions;
 create policy "war_regions_insert" on public.war_regions for insert with check (owner_id = auth.uid());
 create policy "war_regions_update" on public.war_regions for update using (owner_id = auth.uid());
 
--- Tighten war_buildings to owner-only (build/upgrade your own; tick handles capture).
+-- Tighten war_buildings to owner-only AND region-owned (build/upgrade only on a province
+-- you actually own — otherwise a client could plant defensive buildings on anyone's region,
+-- since the tick reads bunker/anti-air by region_id). The tick (definer) bypasses this and
+-- still transfers/downgrades buildings on capture.
 drop policy if exists "war_buildings_insert" on public.war_buildings;
 drop policy if exists "war_buildings_update" on public.war_buildings;
 drop policy if exists "war_buildings_delete" on public.war_buildings;
-create policy "war_buildings_insert" on public.war_buildings for insert with check (owner_id = auth.uid());
-create policy "war_buildings_update" on public.war_buildings for update using (owner_id = auth.uid());
+create policy "war_buildings_insert" on public.war_buildings for insert
+  with check (owner_id = auth.uid()
+    and exists (select 1 from public.war_regions r where r.region_id = war_buildings.region_id and r.owner_id = auth.uid()));
+create policy "war_buildings_update" on public.war_buildings for update
+  using (owner_id = auth.uid()
+    and exists (select 1 from public.war_regions r where r.region_id = war_buildings.region_id and r.owner_id = auth.uid()));
 create policy "war_buildings_delete" on public.war_buildings for delete using (owner_id = auth.uid());
 
 -- Tighten war_movements updates to the owner. The client no longer resolves movements

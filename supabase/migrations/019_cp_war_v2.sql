@@ -1,5 +1,8 @@
 -- Migration 019: CP War v2 – real-world province conquest
--- Replaces the hex schema from 015. Idempotent.
+-- Replaces the hex schema from 015. RUN ONCE: the leading `drop table ... cascade`
+-- intentionally removes the v1 hex tables, so re-running this file RESETS all CP War
+-- state (regions/players/movements/buildings). It does not error on re-run, but it is
+-- destructive — do not re-run on a live season.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 drop table if exists public.war_movements cascade;
