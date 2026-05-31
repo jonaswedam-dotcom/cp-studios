@@ -1,12 +1,25 @@
 // Single source of truth for unit stats. All values are tunable.
+// Travel times are deliberately long (hours): the world advances via the server
+// tick, and slow legs guarantee a defender time to log in (pairs with shields).
+// Keep these short (e.g. 20–60s) while testing the tick locally, then restore.
 export const UNITS = {
-  soldier: { label: 'Soldier', strength: 1, cost: 100, mode: 'land', travelSeconds: 30 },
-  tank:    { label: 'Tank',    strength: 5, cost: 500, mode: 'land', travelSeconds: 45 },
-  jet:     { label: 'Jet',     strength: 3, cost: 800, mode: 'air',  travelSeconds: 20, airRangeKm: 4500 },
-  warship: { label: 'Warship', strength: 2, cost: 600, mode: 'sea',  travelSeconds: 60, seaRangeKm: 7000 },
+  soldier: { label: 'Soldier', strength: 1, cost: 100, mode: 'land', travelSeconds: 3600 },   // 1h
+  tank:    { label: 'Tank',    strength: 5, cost: 500, mode: 'land', travelSeconds: 7200 },   // 2h
+  jet:     { label: 'Jet',     strength: 3, cost: 800, mode: 'air',  travelSeconds: 1800, airRangeKm: 4500 }, // 30m
+  warship: { label: 'Warship', strength: 2, cost: 600, mode: 'sea',  travelSeconds: 7200, seaRangeKm: 7000 }, // 2h
 }
 
 export const UNIT_TYPES = ['soldier', 'tank', 'jet', 'warship']
 
 // What a freshly-spawned player gets on their starting province.
 export const START_ARMY = { soldier: 500, tank: 0, jet: 0, warship: 0 }
+
+// Human-friendly travel time, e.g. 3600 -> "1h", 1800 -> "30m", 5400 -> "1h 30m".
+export function formatDuration(seconds) {
+  if (seconds < 60) return `${seconds}s`
+  const h = Math.floor(seconds / 3600)
+  const m = Math.round((seconds % 3600) / 60)
+  if (h && m) return `${h}h ${m}m`
+  if (h) return `${h}h`
+  return `${m}m`
+}

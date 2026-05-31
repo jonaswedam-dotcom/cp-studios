@@ -9,7 +9,7 @@ import Sidebar from '../war/Sidebar.jsx'
 import BuyUnitsModal from '../war/BuyUnitsModal.jsx'
 import MoveUnitsModal from '../war/MoveUnitsModal.jsx'
 import BuildingsModal from '../war/BuildingsModal.jsx'
-import { UNITS, UNIT_TYPES, START_ARMY } from '../war/units.js'
+import { UNITS, UNIT_TYPES, START_ARMY, formatDuration } from '../war/units.js'
 import { troopCost } from '../war/economy.js'
 import { stackStrength, stackTotal, resolveCombat, emptyStack, stackFromRow } from '../war/combat.js'
 import { costMultiplier, defenseMultiplier, antiAirFactor, strengthMultiplier, buildingCost, SLOTS_PER_REGION } from '../war/buildings.js'
@@ -138,7 +138,7 @@ function WarGame() {
       await supabase.from('war_movements').insert({
         player_id: userId, from_region: moveFrom, to_region: dest, unit_type: type, count, mode, arrives_at: arrivesAt,
       })
-      showFlash(`${count} ${UNITS[type].label}s en route — arrives in ${UNITS[type].travelSeconds}s`)
+      showFlash(`${count} ${UNITS[type].label}s en route — arrives in ${formatDuration(UNITS[type].travelSeconds)}`)
     } finally { setMoveFrom(null); setSelected(null); setBusy(false) }
   }, [busy, moveFrom, regions, userId])
 

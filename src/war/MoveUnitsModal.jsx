@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { UNITS, UNIT_TYPES } from './units.js'
+import { UNITS, UNIT_TYPES, formatDuration } from './units.js'
 import { landNeighbors, airReachable, seaReachable } from './geo.js'
 import { UnitIcon } from './icons.jsx'
 
@@ -71,7 +71,7 @@ export default function MoveUnitsModal({ graph, regions, fromRegion, onConfirm, 
             onChange={(e) => setCount(e.target.value)}
             className="w-full bg-cp-elevated border border-cp-border rounded-xl px-4 py-3 text-cp-text text-sm focus:border-blue-500/50 focus:outline-none"
             placeholder={`1 – ${max}`} />
-          <p className="text-xs text-cp-muted mt-1.5">Arrives in {UNITS[type].travelSeconds}s.</p>
+          <p className="text-xs text-cp-muted mt-1.5">Arrives in {formatDuration(UNITS[type].travelSeconds)}.</p>
         </div>
 
         <div className="flex gap-3 pt-1">
