@@ -50,9 +50,25 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes coinFloat {
+  0%   { transform: translateY(0)     rotate(0deg);   opacity: 0.65; }
+  40%  { transform: translateY(-14px) rotate(6deg);   opacity: 0.85; }
+  70%  { transform: translateY(-8px)  rotate(-3deg);  opacity: 0.75; }
+  100% { transform: translateY(0)     rotate(0deg);   opacity: 0.65; }
+}
+
+@keyframes coinDrift {
+  0%   { transform: translateY(0)    translateX(0)    rotate(0deg);  }
+  33%  { transform: translateY(-18px) translateX(6px)  rotate(8deg);  }
+  66%  { transform: translateY(-10px) translateX(-4px) rotate(-4deg); }
+  100% { transform: translateY(0)    translateX(0)    rotate(0deg);  }
+}
+
 /* ── Utility classes ── */
 .heart-pop    { animation: heartPop 0.42s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
 .page-in      { animation: pageIn 0.38s ease forwards; }
 .modal-in     { animation: modalIn 0.26s ease forwards; }
 .backdrop-in  { animation: backdropIn 0.2s ease forwards; }
 .comment-in   { animation: slideUp 0.2s ease forwards; }
+.coin-float   { animation: coinFloat 4s ease-in-out infinite; }
+.coin-drift   { animation: coinDrift 6s ease-in-out infinite; }
