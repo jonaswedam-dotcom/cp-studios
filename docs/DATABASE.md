@@ -11,7 +11,7 @@ policies, and the setup steps.
 > [Security limitations & known gaps](#security-limitations--known-gaps).
 
 All schema is defined in [`../supabase/migrations/`](../supabase/migrations/) as numbered SQL
-files (`001`–`018`). There is no migration runner — run them by hand in the Supabase
+files (`001`–`019`). There is no migration runner — run them by hand in the Supabase
 **SQL Editor**, in order.
 
 ---
@@ -20,13 +20,13 @@ files (`001`–`018`). There is no migration runner — run them by hand in the 
 
 1. Create a Supabase project; copy the Project URL and anon key into `.env.local`
    (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`).
-2. Run migrations `001` → `018` in order in the SQL Editor.
+2. Run migrations `001` → `019` in order in the SQL Editor.
 3. Confirm the public storage bucket `cp-studios` exists (migration `001` creates it).
 4. Enable **Realtime** on the tables that need it (some are enabled in SQL, others must be
    toggled in **Database → Replication**):
    - `messages` — enabled in migration `003`.
    - `likes`, `comments` — required for live photo reactions (commented hint in `001`).
-   - `war_tiles`, `war_players`, `war_movements` — required for CP War (commented hint in `015`).
+   - `war_regions`, `war_players`, `war_movements` — required for CP War (commented hint in `019`).
 5. Make sure an account exists with the **admin email** (see [Admin model](#admin-model)).
 
 ---
@@ -144,22 +144,68 @@ read/insert only their own rows.
 Audit log of coin transfers (`sender_id`, `recipient_id`, `amount`). Participants can read
 their own; only the sender can insert. Written by the `donate_coins` RPC.
 
-### CP War (migration `015`)
+### CP War (migration `019` — v2 province schema)
+
+Migration `019_cp_war_v2.sql` **dropped** the hex-grid tables from `015`
+(`war_tiles`, and the hex-era `war_players`/`war_movements`) and recreated all three tables
+for real-world provinces keyed by Natural Earth `adm1_code`.
 
 #### `war_players`
-A player's enrollment in the war: `user_id` (unique), `display_name`, `color`, starting tile
-coords, `is_alive`.
+One row per enrolled player.
 
-#### `war_tiles`
-The board. One row per claimed hex: `q`, `r` (unique together), `owner_id`, `owner_name`,
-`troop_count`, `color`. Read by all authenticated users; **any** authenticated user can
-insert/update (because combat resolution runs client-side and must modify enemy tiles).
+| Column           | Type        | Notes                                                      |
+|------------------|-------------|------------------------------------------------------------|
+| `user_id`        | uuid PK     | FK → `auth.users` (`on delete cascade`)                    |
+| `display_name`   | text        |                                                            |
+| `color`          | text        | hex colour string assigned at spawn                        |
+| `spawn_region`   | text        | `region_id` of the player's HQ province                   |
+| `season_id`      | integer     | default `1`                                                |
+| `is_alive`       | boolean     | default `true`                                             |
+| `shield_until`   | timestamptz | nullable; post-spawn attack immunity expiry                |
+| `last_income_at` | timestamptz | default `now()`; drives periodic resource income          |
+| `created_at`     | timestamptz | default `now()`                                            |
+
+RLS: any authenticated user can `select`; a user can `insert`/`update` only their own row
+(`auth.uid() = user_id`).
+
+#### `war_regions`
+The map. One row per province (populated lazily as players claim territory).
+
+| Column       | Type        | Notes                                                             |
+|--------------|-------------|-------------------------------------------------------------------|
+| `region_id`  | text PK     | = `adm1_code` from `public/war/provinces.json`                    |
+| `country_code`| text       |                                                                   |
+| `owner_id`   | uuid        | FK → `auth.users` (`on delete set null`); nullable = neutral      |
+| `owner_name` | text        |                                                                   |
+| `color`      | text        |                                                                   |
+| `is_hq`      | boolean     | default `false`; true for the owner's capital province            |
+| `soldier`    | integer     | default `0`; units of this type present in the province           |
+| `tank`       | integer     | default `0`                                                       |
+| `jet`        | integer     | default `0`                                                       |
+| `updated_at` | timestamptz | default `now()`                                                   |
+
+RLS: any authenticated user can `select`, `insert`, and `update`. Write is deliberately
+broad-authenticated because Phase 1 resolves combat **client-side** and must modify enemy
+provinces directly. (Phase 3 plans to replace this with server-authoritative writes.)
 
 #### `war_movements`
-In-flight troop movements: from/to coords, `troop_count`, `status`
-(`moving`|`arrived`|`cancelled`), `arrives_at`. Read by all authenticated; a player can
-insert/update only their own (`auth.uid() = player_id`). Movement resolution is polled and
-applied client-side.
+In-flight unit movements between provinces.
+
+| Column        | Type        | Notes                                                       |
+|---------------|-------------|-------------------------------------------------------------|
+| `id`          | uuid PK     | default `gen_random_uuid()`                                 |
+| `player_id`   | uuid        | FK → `auth.users` (`on delete cascade`)                     |
+| `from_region` | text        | source `region_id`                                          |
+| `to_region`   | text        | destination `region_id`                                     |
+| `unit_type`   | text        | `soldier` \| `tank` \| `jet`                                |
+| `count`       | integer     |                                                             |
+| `mode`        | text        | `land` \| `air`                                             |
+| `status`      | text        | `moving` \| `arrived` \| `cancelled` (default `moving`)     |
+| `arrives_at`  | timestamptz |                                                             |
+| `created_at`  | timestamptz | default `now()`                                             |
+
+RLS: any authenticated user can `select`; a player can `insert`/`update` only their own rows
+(`auth.uid() = player_id`). Movement resolution is polled and applied client-side.
 
 ### Direct messages (migration `018`)
 
@@ -329,7 +375,8 @@ behaviour and would need fixing before this app could be exposed to untrusted us
 | `012_wallet_display_name.sql`          | Denormalize `display_name` into wallets; drop the RPC          |
 | `013_backfill_wallet_display_names.sql`| Pre-create wallets + backfill names from `pending_users`       |
 | `014_wallets_select_all.sql`           | Fix wallets read policy (expression form)                      |
-| `015_cp_war.sql`                       | CP War: `war_players`, `war_tiles`, `war_movements`            |
+| `015_cp_war.sql`                       | CP War v1 (hex): `war_players`, `war_tiles`, `war_movements` — superseded by `019` |
 | `016_reset_balances.sql`               | One-off: reset all balances to 1000                            |
 | `017_security_hardening.sql`           | RLS hardening pass (see security review)                       |
 | `018_direct_messages.sql`              | `dm_threads`, `direct_messages`, RLS, trigger, 3 RPCs, realtime|
+| `019_cp_war_v2.sql`                    | CP War v2: real-world province schema (`war_players`/`war_regions`/`war_movements`) |
