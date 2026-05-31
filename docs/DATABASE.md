@@ -11,8 +11,9 @@ policies, and the setup steps.
 > [Security limitations & known gaps](#security-limitations--known-gaps).
 
 All schema is defined in [`../supabase/migrations/`](../supabase/migrations/) as numbered SQL
-files (`001`–`021`). There is no migration runner — run them by hand in the Supabase
-**SQL Editor**, in order.
+files (`001`–`024`). There is no migration runner — run them by hand in the Supabase
+**SQL Editor**, in order. Migration `024` also needs the **`pg_cron`** extension enabled
+(Database → Extensions) to schedule the CP War server tick.
 
 ---
 
@@ -20,7 +21,8 @@ files (`001`–`021`). There is no migration runner — run them by hand in the 
 
 1. Create a Supabase project; copy the Project URL and anon key into `.env.local`
    (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`).
-2. Run migrations `001` → `021` in order in the SQL Editor.
+2. Run migrations `001` → `024` in order in the SQL Editor. Enable the `pg_cron` extension
+   (Database → Extensions) before/with `024` so the CP War `war-tick` job can be scheduled.
 3. Confirm the public storage bucket `cp-studios` exists (migration `001` creates it).
 4. Enable **Realtime** on the tables that need it (some are enabled in SQL, others must be
    toggled in **Database → Replication**):
@@ -162,8 +164,10 @@ One row per enrolled player.
 | `spawn_region`   | text        | `region_id` of the player's HQ province                   |
 | `season_id`      | integer     | default `1`                                                |
 | `is_alive`       | boolean     | default `true`                                             |
-| `shield_until`   | timestamptz | nullable; post-spawn attack immunity expiry                |
-| `last_income_at` | timestamptz | default `now()`; drives periodic resource income          |
+| `shield_until`   | timestamptz | nullable; post-spawn (48h) attack-immunity expiry          |
+| `last_income_at` | timestamptz | default `now()`; last time the tick accrued bank income    |
+| `vault`          | integer     | default `0` (migration `022`); accrued, uncollected income |
+| `last_active_at` | timestamptz | default `now()` (migration `022`); stamped on income collect; drives the offline dug-in defence bonus |
 | `created_at`     | timestamptz | default `now()`                                            |
 
 RLS: any authenticated user can `select`; a user can `insert`/`update` only their own row
@@ -186,9 +190,11 @@ The map. One row per province (populated lazily as players claim territory).
 | `warship`    | integer     | default `0` (added in migration `020`)                            |
 | `updated_at` | timestamptz | default `now()`                                                   |
 
-RLS: any authenticated user can `select`, `insert`, and `update`. Write is deliberately
-broad-authenticated because Phase 1 resolves combat **client-side** and must modify enemy
-provinces directly. (Phase 3 plans to replace this with server-authoritative writes.)
+RLS: any authenticated user can `select`. As of Phase 3 (migration `024`) `insert`/`update`
+are **owner-only** (`owner_id = auth.uid()`) — a client may only write its own provinces
+(spawn, buying units, decrementing on send). All cross-player writes (capture, combat,
+reinforce-on-arrival) are done by the SECURITY DEFINER `war_tick()` function. (Phases 1–2 used
+broad-authenticated write because combat resolved client-side.)
 
 #### `war_movements`
 In-flight unit movements between provinces.
@@ -207,7 +213,9 @@ In-flight unit movements between provinces.
 | `created_at`  | timestamptz | default `now()`                                             |
 
 RLS: any authenticated user can `select`; a player can `insert`/`update` only their own rows
-(`auth.uid() = player_id`). Movement resolution is polled and applied client-side.
+(`auth.uid() = player_id`; the `update` policy was tightened from broad-authenticated to
+owner-only in migration `024`). Movement resolution is done **server-side** by `war_tick()`
+(migration `023`); the client only inserts movements.
 
 #### `war_buildings` (migration `021`)
 Structures placed on a province (max 3 slots per province). Defence buildings (`bunker`,
@@ -227,8 +235,35 @@ Structures placed on a province (max 3 slots per province). Defence buildings (`
 Effects (mirrored in `src/war/buildings.js`): **bunker** +50%/level defender strength;
 **antiair** removes 25%/level of incoming jet strength (cap 75%); **factory** −10%/level troop
 cost (floor 40%); **lab** +10%/level troop strength; **bank** passive income (50 coins/level/hr,
-paid by the Phase 3 server tick). RLS in Phase 2: broad-authenticated write (client resolves
-capture); Phase 3 tightens to owner-only. Enable Realtime for `war_buildings`.
+paid by the Phase 3 server tick). RLS: `insert`/`update`/`delete` are **owner-only** as of
+migration `024` (Phases 2 used broad-authenticated write while the client resolved capture).
+Enable Realtime for `war_buildings`.
+
+### CP War server tick (Phase 3 — migrations `022`–`024`)
+
+As of Phase 3, CP War combat and income are **server-authoritative** — the first server-side
+game logic in this app (the casino remains client-side). A `pg_cron` job runs `war_tick()`
+once per minute; clients only write their own rows and read realtime state.
+
+Functions (all `SECURITY DEFINER` except the two pure helpers):
+
+| Function                       | Purpose                                                                 |
+|--------------------------------|-------------------------------------------------------------------------|
+| `war_tick()`                   | Resolves every due `war_movements` row (move-in vs neutral garrison, reinforce, or combat with building modifiers + shields + offline dug-in bonus + capture spoils), then accrues capped income into each player's `vault`, then recomputes `is_alive`. Scheduled by `pg_cron` (`war-tick`, `* * * * *`). |
+| `war_collect_income()`         | Moves a player's accrued `vault` into their `wallets.balance`, zeroes the vault, stamps `last_active_at`. Called by the client on load + every 60s. Returns the collected amount. |
+| `war_unit_strength(text)`      | Pure: unit strength (soldier 1 / tank 5 / jet 3 / warship 2).           |
+| `war_neutral_soldiers(text)`   | Pure: deterministic neutral-garrison size (50–300) for an unclaimed region. |
+
+**Duplicated constants (must stay in sync):** unit strengths, the neutral-garrison hash
+(`h = (h*31 + ascii) mod 2^32; 50 + h%251`), the bank income rate (50 coins/level/hr), the
+vault cap (10h), the loot formula (`0.8 × defenderStrength × 5`), and the building multipliers
+all live in BOTH `src/war/*.js` and `023_war_tick.sql`. Changing one means changing the other.
+(The JS combat/spoils/neutral modules are retained for unit tests + reference even though the
+client no longer resolves combat.)
+
+Income vault never decreases if a player loses all banks (cap drops but accrued coins survive
+until collected); attacker/held survivors are floored to ≥1 unit (no 0-unit "ghost" provinces);
+a shielded defender bounces incoming units home only if the origin is still owned by the sender.
 
 ### Direct messages (migration `018`)
 
@@ -405,3 +440,6 @@ behaviour and would need fixing before this app could be exposed to untrusted us
 | `019_cp_war_v2.sql`                    | CP War v2: real-world province schema (`war_players`/`war_regions`/`war_movements`) |
 | `020_war_warship.sql`                  | CP War Phase 2: `war_regions.warship` column + `warship`/`sea` movement constraints |
 | `021_war_buildings.sql`                | CP War Phase 2: `war_buildings` table (bunker/antiair/factory/lab/bank, Lv 1–3) + RLS |
+| `022_war_idle_columns.sql`             | CP War Phase 3: `war_players.vault` + `last_active_at` (idle economy/activity) |
+| `023_war_tick.sql`                     | CP War Phase 3: `war_tick()` + `war_collect_income()` + helpers (server combat/income) |
+| `024_war_cron_and_rls.sql`             | CP War Phase 3: `pg_cron` schedule for `war_tick` + server-authoritative (owner-only) RLS |

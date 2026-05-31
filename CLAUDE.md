@@ -80,12 +80,20 @@ to the auth user), so joining `wallets` → `profiles` for names returned "Playe
 - When a user renames themselves, `Navbar.jsx` mirrors the new name into
   `wallets.display_name` (and into auth metadata). Keep these in sync if you touch renaming.
 
-### 4. The casino is not server-authoritative
-Game outcomes are decided in the browser, and `CasinoContext.placeBet()` writes the resulting
-balance straight to the `wallets` row (guarded only by "you may update your own wallet" RLS).
-Coin transfers are the exception — they go through the `donate_coins` SECURITY DEFINER RPC,
-which validates balance and is race-safe. Don't assume balances are tamper-proof; if you ever
-need them to be, move game resolution into Postgres functions/Edge Functions.
+### 4. The casino is not server-authoritative (but CP War now is)
+Casino game outcomes are decided in the browser, and `CasinoContext.placeBet()` writes the
+resulting balance straight to the `wallets` row (guarded only by "you may update your own
+wallet" RLS). Coin transfers are the exception — they go through the `donate_coins` SECURITY
+DEFINER RPC, which validates balance and is race-safe. Don't assume casino balances are
+tamper-proof; if you ever need them to be, move game resolution into Postgres functions.
+
+**CP War is the exception:** as of Phase 3 its combat, conquest, and income are
+**server-authoritative** via the `war_tick()` SECURITY DEFINER function (scheduled by
+`pg_cron`) — the first server-side game logic in this app. Clients can only write their **own**
+`war_regions`/`war_buildings`/`war_movements` rows; all cross-player changes flow through the
+tick. (Players can still inflate their *own* province's unit counts via direct writes — unit
+purchases remain client-side, same trust level as the casino — but they can no longer touch
+enemy territory.) See [`docs/DATABASE.md`](docs/DATABASE.md#cp-war-server-tick-phase-3--migrations-022024).
 
 ### 5. Migrations are manual and ordered
 There is no migration runner. SQL files in `supabase/migrations/` are run by hand in the
@@ -95,10 +103,14 @@ Supabase SQL editor, **in numerical order**. When adding schema:
 - If it adds a realtime table, note the `alter publication supabase_realtime add table ...`
   step (some must be enabled in the dashboard).
 
-### 6. CP War is intentionally disabled
-`src/pages/WarPage.jsx` starts with `const COMING_SOON = true`, which short-circuits to an
-inline "coming soon" screen; the full game (`WarGame`) lives below it. The navbar's "War"
-entry is a deliberately non-clickable span. Set `COMING_SOON = false` to bring it back.
+### 6. CP War is enabled (real-world-map strategy game)
+`src/pages/WarPage.jsx` has `const COMING_SOON = false` — the full game (`WarGame`) renders.
+It is a persistent, real-world-map conquest game (MapLibre + Natural Earth admin-1 provinces):
+random-city spawn, buy soldiers/tanks/jets/warships, conquer adjacent/reachable provinces,
+build & upgrade five building types, with an overnight `pg_cron` server tick (see §4). The
+pure game logic lives in testable modules under `src/war/` (`node --test src/war/*.test.js`);
+the province graph asset is built by `scripts/build-war-geo.mjs` → `public/war/provinces.*`.
+Set `COMING_SOON = true` to hide it behind a "coming soon" screen again.
 
 > **Orphaned file:** `src/pages/WarComingSoon.jsx` is a standalone component that is **not
 > imported anywhere** — `WarPage.jsx` defines its own inline `WarComingSoon`. It's dead code;
@@ -156,7 +168,7 @@ enforced behaviour.
 | `dm-typing-<tid>`   | `ChatBubble.jsx` | Per-thread DM typing-indicator broadcasts          |
 | `navbar-pending`    | `Navbar.jsx`     | Admin's "new signup request" notification dot       |
 | `profile-rt-<id>`   | `ProfilePage`    | Live likes/comments on the open profile            |
-| `war-rt`            | `WarPage.jsx`    | Tiles / players / movements sync for CP War         |
+| `war-rt-v2`         | `useWarData.js`  | regions / players / movements / buildings sync for CP War |
 
 ## Where to make common changes
 
@@ -167,4 +179,6 @@ enforced behaviour.
 | Tweak auth / approval flow             | `AppContext.jsx` (login/signup) + `AdminPage.jsx`      |
 | Change the theme/colors                | `tailwind.config.js`                                   |
 | Add a DB table/policy                  | new `supabase/migrations/0NN_*.sql` + `docs/DATABASE.md` |
-| Re-enable CP War                       | `WarPage.jsx` → `COMING_SOON = false`                  |
+| Show/hide CP War                       | `WarPage.jsx` → `COMING_SOON` flag                     |
+| Tune CP War balance                    | `src/war/units.js` / `buildings.js` — but combat/income also live in `supabase/migrations/023_war_tick.sql`; **keep the duplicated constants in sync** |
+| Regenerate the CP War province map     | `scripts/build-war-geo.mjs` → `npm run build:war-geo`  |
