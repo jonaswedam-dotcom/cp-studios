@@ -45,8 +45,8 @@ main.jsx
 Components call `supabase.from(...)` / `supabase.rpc(...)` / `supabase.storage` **directly**.
 There is no service/repository layer. Realtime updates come from `supabase.channel(...)`
 subscriptions set up inside `useEffect`. Common pattern: optimistic local state update, then
-the network call, with realtime reconciling other clients (see `ProfilePage` likes/comments
-and `ChatBubble`).
+the network call, with realtime reconciling other clients (see `ChatBubble` and the casino
+send-coins flow).
 
 ## Critical things to know before editing
 
@@ -71,12 +71,12 @@ USING (auth.role() = 'authenticated')
 If a list mysteriously comes back empty for everyone, suspect this first.
 
 ### 3. Display names are denormalized into `wallets.display_name`
-Historically, `profiles.user_id` is `NULL` for many rows (CreateProfilePage doesn't set it
-to the auth user), so joining `wallets` → `profiles` for names returned "Player". The fix
-(migrations `012`/`013`) was to store `display_name` directly on `wallets`. Therefore:
+Historically, `profiles.user_id` was `NULL` for many rows (the old profile-creation flow did
+not set it to the auth user), so joining `wallets` → `profiles` for names returned "Player".
+The fix (migrations `012`/`013`) was to store `display_name` directly on `wallets`. Therefore:
 
-- The leaderboard and Send-Coins modal read `wallets.display_name` — **do not** reintroduce a
-  `profiles` join for names.
+- The leaderboard, Send-Coins modal, and homepage stats page read `wallets.display_name` —
+  **do not** reintroduce a `profiles` join for names.
 - When a user renames themselves, `Navbar.jsx` mirrors the new name into
   `wallets.display_name` (and into auth metadata). Keep these in sync if you touch renaming.
 
@@ -113,7 +113,9 @@ implies a server-side one:
   `AppContext.login`, but the RLS on `profiles` / `photos` / `likes` / `comments` only requires
   `auth.role() = 'authenticated'`. Any signed-in user — including a *rejected/revoked* one with a
   live session — can read/write those tables directly. Revoking only flips a column; it doesn't
-  end sessions.
+  end sessions. *(Note: the profile-gallery and photo-upload UI has been removed from the app,
+  so these surfaces no longer exist in the client — but the tables and their RLS policies remain
+  unchanged in Supabase.)*
 - **Storage has no per-object ownership.** The `cp-studios` bucket's update/delete policies are
   named "own objects" but only check `authenticated`, so any member can overwrite/delete any
   file; uploads are unrestricted by type/size.
@@ -155,7 +157,6 @@ enforced behaviour.
 | `dm-user-<uid>`     | `ChatBubble.jsx` | Per-user stream of incoming DMs (RLS-scoped)        |
 | `dm-typing-<tid>`   | `ChatBubble.jsx` | Per-thread DM typing-indicator broadcasts          |
 | `navbar-pending`    | `Navbar.jsx`     | Admin's "new signup request" notification dot       |
-| `profile-rt-<id>`   | `ProfilePage`    | Live likes/comments on the open profile            |
 | `war-rt`            | `WarPage.jsx`    | Tiles / players / movements sync for CP War         |
 
 ## Where to make common changes
@@ -165,6 +166,7 @@ enforced behaviour.
 | Add/adjust a casino game               | `src/pages/casino/<Game>.jsx` + register in `CasinoPage.jsx` `GAMES` |
 | Change starting coins / daily bonus    | `CasinoContext.jsx` (`DAILY_BONUS_AMOUNT`, start balance) |
 | Tweak auth / approval flow             | `AppContext.jsx` (login/signup) + `AdminPage.jsx`      |
+| Edit the homepage / intro page         | `src/pages/HomePage.jsx` (+ `src/components/CoinField.jsx`) |
 | Change the theme/colors                | `tailwind.config.js`                                   |
 | Add a DB table/policy                  | new `supabase/migrations/0NN_*.sql` + `docs/DATABASE.md` |
 | Re-enable CP War                       | `WarPage.jsx` → `COMING_SOON = false`                  |
