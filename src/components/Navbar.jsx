@@ -341,7 +341,6 @@ export default function Navbar() {
 
             {[
               { to: '/',        label: 'Home',   icon: null                          },
-              { to: '/create',  label: 'Upload', icon: null                          },
               { to: '/casino',  label: 'Casino', icon: <DiceIcon />                  },
               ...(currentUser.isAdmin
                 ? [{ to: '/admin', label: 'Admin', badge: hasNewRequests, icon: null }]
