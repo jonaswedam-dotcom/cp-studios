@@ -4,7 +4,7 @@ import { supabase } from '../supabase'
 const AppContext = createContext(null)
 export const useApp = () => useContext(AppContext)
 
-const ADMIN_EMAIL = 'jonas.wedam@gmail.com'
+const ADMIN_EMAILS = ['jonas.wedam@gmail.com', 'admin@cpstudios.app']
 
 // Normalise a DB profile row → shape the rest of the app expects
 export function normalizeProfile(row) {
@@ -63,7 +63,7 @@ export function AppProvider({ children }) {
                   || 'You',
         avatar: session.user.user_metadata?.avatar_url
                   || `https://i.pravatar.cc/150?img=3`,
-        isAdmin: session.user.email === ADMIN_EMAIL,
+        isAdmin: ADMIN_EMAILS.includes(session.user.email),
       }
     : null
 
@@ -93,7 +93,7 @@ export function AppProvider({ children }) {
     }
 
     // Admin bypasses the pending-approval gate
-    if (data.user.email !== ADMIN_EMAIL) {
+    if (!ADMIN_EMAILS.includes(data.user.email)) {
       const { data: pu, error: puErr } = await supabase
         .from('pending_users')
         .select('status')
