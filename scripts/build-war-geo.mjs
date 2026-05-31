@@ -68,6 +68,23 @@ let topo = topology({ p: fc }) // unquantized — presimplify needs geographic c
 // shared). Geometry order is preserved == codes order.
 const nbrs = neighbors(topo.objects.p.geometries)
 
+// Coastal detection: count how many geometries use each arc on the UNQUANTIZED topology.
+// Inter-province borders are shared (count 2); an arc used exactly once is a coastline /
+// dataset edge, so a province touching such an arc is coastal. Computed here — before
+// simplify/quantize — because those can drop or reindex arcs. Decode arc indices with
+// ones'-complement (`~a`) for reversed arcs, NOT Math.abs (which would mis-pair a shared
+// border's two half-arcs and flag everything coastal).
+function arcsOf(geom) {
+  const out = []
+  const walk = (a) => (Array.isArray(a) ? a.forEach(walk) : out.push(a < 0 ? ~a : a))
+  walk(geom.arcs ?? [])
+  return out
+}
+const topoGeoms = topo.objects.p.geometries
+const arcUse = new Map()
+topoGeoms.forEach((g) => arcsOf(g).forEach((idx) => arcUse.set(idx, (arcUse.get(idx) || 0) + 1)))
+const coastalByIndex = topoGeoms.map((g) => arcsOf(g).some((idx) => (arcUse.get(idx) || 0) === 1))
+
 // Pipeline: simplify first (drop the lowest-weight REMOVE_PCT of points), THEN quantize
 // to integer deltas. Quantizing last keeps the shipped TopoJSON compact.
 topo = presimplify(topo)
@@ -88,6 +105,7 @@ simplified.features.forEach((f, i) => {
     city: cityHit ? cityHit.name : name,
     country,
     centroid: centroid(f.geometry),
+    coastal: coastalByIndex[i],
     neighbors: nbrs[i].map(j => codes[j]),
   }
 })

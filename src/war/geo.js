@@ -29,3 +29,17 @@ export function airReachable(id, graph, rangeKm) {
   }
   return out
 }
+
+// Coastal provinces reachable by sea from a coastal `id` within rangeKm.
+// Returns [] if `id` itself is not coastal.
+export function seaReachable(id, graph, rangeKm) {
+  const self = graph.regions[id]
+  if (!self || !self.coastal) return []
+  const from = self.centroid
+  const out = []
+  for (const [rid, r] of Object.entries(graph.regions)) {
+    if (rid === id || !r.coastal) continue
+    if (distanceKm(from, r.centroid) <= rangeKm) out.push(rid)
+  }
+  return out
+}
