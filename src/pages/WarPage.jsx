@@ -8,9 +8,11 @@ import MapView from '../war/MapView.jsx'
 import Sidebar from '../war/Sidebar.jsx'
 import BuyUnitsModal from '../war/BuyUnitsModal.jsx'
 import MoveUnitsModal from '../war/MoveUnitsModal.jsx'
+import BuildingsModal from '../war/BuildingsModal.jsx'
 import { UNITS, UNIT_TYPES, START_ARMY } from '../war/units.js'
 import { troopCost } from '../war/economy.js'
 import { resolveCombat, emptyStack, stackFromRow } from '../war/combat.js'
+import { costMultiplier, defenseMultiplier, antiAirFactor, strengthMultiplier, buildingCost, SLOTS_PER_REGION } from '../war/buildings.js'
 import { landNeighbors, airReachable, seaReachable } from '../war/geo.js'
 import { pickRandomSpawn } from '../war/spawn.js'
 
@@ -45,11 +47,12 @@ function WarGame() {
   const userId   = session?.user?.id
   const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || 'Player'
 
-  const { graph, regions, players, movements, loading } = useWarData(userId)
+  const { graph, regions, players, movements, buildings, loading } = useWarData(userId)
 
   const [selected, setSelected]   = useState(null)   // region_id (one of mine)
   const [showBuy, setShowBuy]     = useState(false)
   const [moveFrom, setMoveFrom]   = useState(null)    // region_id for the move modal
+  const [buildFor, setBuildFor]   = useState(null)    // region_id for the buildings modal
   const [busy, setBusy]           = useState(false)
   const [flash, setFlash]         = useState('')
   const initRef = useRef(false)
@@ -58,6 +61,11 @@ function WarGame() {
   const myRegionRows = Object.values(regions).filter((r) => r.owner_id === userId)
   const myUnits = myRegionRows.reduce((s, r) => s + UNIT_TYPES.reduce((a, t) => a + (r[t] || 0), 0), 0)
   const eliminated = me && myRegionRows.length === 0
+
+  const myBuildings    = buildings.filter((b) => b.owner_id === userId)
+  const buildingsIn    = (regionId) => buildings.filter((b) => b.region_id === regionId)
+  const myCostMult     = costMultiplier(myBuildings)
+  const myStrengthMult = strengthMultiplier(myBuildings)
 
   const showFlash = (m) => { setFlash(m); setTimeout(() => setFlash(''), 4000) }
 
@@ -87,7 +95,7 @@ function WarGame() {
     if (busy || !me) return
     setBusy(true)
     try {
-      const cost = troopCost(type, count)
+      const cost = troopCost(type, count, myCostMult)
       if ((balance ?? 0) < cost) { showFlash('Not enough coins.'); return }
       let target = myRegionRows.find((r) => r.is_hq) || myRegionRows[0]
       if (!target) {
@@ -111,7 +119,7 @@ function WarGame() {
       await adjustBalance(-cost)
       showFlash(`+${count} ${UNITS[type].label}${count > 1 ? 's' : ''}`)
     } finally { setShowBuy(false); setBusy(false) }
-  }, [busy, me, balance, myRegionRows, regions, graph, userId, adjustBalance])
+  }, [busy, me, balance, myRegionRows, regions, graph, userId, adjustBalance, myCostMult])
 
   // ── Send a movement ─────────────────────────────────────────────────────────
   const handleMove = useCallback(async ({ type, dest, count }) => {
@@ -131,6 +139,34 @@ function WarGame() {
       showFlash(`${count} ${UNITS[type].label}s en route — arrives in ${UNITS[type].travelSeconds}s`)
     } finally { setMoveFrom(null); setSelected(null); setBusy(false) }
   }, [busy, moveFrom, regions, userId])
+
+  // ── Build / upgrade buildings on an owned province ──────────────────────────
+  const handleBuild = useCallback(async (type) => {
+    if (busy || !buildFor) return
+    setBusy(true)
+    try {
+      const cost = buildingCost(type, 0)
+      if ((balance ?? 0) < cost) { showFlash('Not enough coins.'); return }
+      if (buildingsIn(buildFor).length >= SLOTS_PER_REGION) { showFlash('No slots left.'); return }
+      const { error } = await supabase.from('war_buildings').insert({ region_id: buildFor, owner_id: userId, type, level: 1 })
+      if (error) { showFlash('Build failed.'); return }
+      await adjustBalance(-cost)
+      showFlash(`Built ${type}.`)
+    } finally { setBusy(false) }
+  }, [busy, buildFor, balance, buildings, userId, adjustBalance])
+
+  const handleUpgrade = useCallback(async (b) => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const cost = buildingCost(b.type, b.level)
+      if ((balance ?? 0) < cost) { showFlash('Not enough coins.'); return }
+      const { error } = await supabase.from('war_buildings').update({ level: b.level + 1 }).eq('id', b.id)
+      if (error) { showFlash('Upgrade failed.'); return }
+      await adjustBalance(-cost)
+      showFlash(`Upgraded ${b.type} to Lv ${b.level + 1}.`)
+    } finally { setBusy(false) }
+  }, [busy, balance, adjustBalance])
 
   // ── Resolve arrived movements (client poll; Phase 3 moves this server-side) ──
   const resolveMovements = useCallback(async () => {
@@ -155,8 +191,13 @@ function WarGame() {
           .update({ [mv.unit_type]: (dest[mv.unit_type] || 0) + mv.count, updated_at: new Date().toISOString() })
           .eq('region_id', mv.to_region)
       } else {
+        const defBuildings = buildings.filter((b) => b.region_id === mv.to_region)
         const defense = stackFromRow(dest)
-        const r = resolveCombat(incoming, defense)
+        const r = resolveCombat(incoming, defense, {
+          attackMult: strengthMultiplier(buildings.filter((b) => b.owner_id === mv.player_id)),
+          defenseMult: defenseMultiplier(defBuildings),
+          antiAir: antiAirFactor(defBuildings),
+        })
         if (r.winner === 'attacker') {
           await supabase.from('war_regions').update({
             owner_id: mv.player_id, owner_name: player?.display_name || 'Player', color: player?.color || '#888',
@@ -169,7 +210,7 @@ function WarGame() {
         }
       }
     }
-  }, [movements, regions, players, graph])
+  }, [movements, regions, players, graph, buildings])
 
   useEffect(() => {
     const id = setInterval(resolveMovements, 4000)
@@ -183,7 +224,7 @@ function WarGame() {
       if (row?.owner_id === userId) setSelected(regionId)
       return
     }
-    if (regionId === selected) { setSelected(null); return }
+    if (regionId === selected) { setBuildFor(selected); setSelected(null); return }
     const src = regions[selected]
     if (!src || src.owner_id !== userId) { setSelected(null); return } // lost the source meanwhile
     const reachableLand = landNeighbors(selected, graph)
@@ -216,6 +257,11 @@ function WarGame() {
     <div className="flex flex-col lg:flex-row h-[calc(100vh-64px)] overflow-hidden bg-[#0a0a0a]">
       {showBuy && <BuyUnitsModal balance={balance} loading={busy} onConfirm={handleBuy} onClose={() => setShowBuy(false)} />}
       {moveFrom && <MoveUnitsModal graph={graph} regions={regions} fromRegion={moveFrom} loading={busy} onConfirm={handleMove} onClose={() => { setMoveFrom(null); setSelected(null) }} />}
+      {buildFor && (
+        <BuildingsModal regionName={graph.regions[buildFor]?.city || buildFor}
+          regionBuildings={buildingsIn(buildFor)} balance={balance} loading={busy}
+          onBuild={handleBuild} onUpgrade={handleUpgrade} onClose={() => setBuildFor(null)} />
+      )}
 
       {flash && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-5 py-3 bg-cp-card border border-cp-border rounded-2xl text-sm font-medium text-cp-text shadow-xl pointer-events-none">
@@ -230,7 +276,7 @@ function WarGame() {
       )}
 
       <div className="relative flex-1 overflow-hidden">
-        <MapView graph={graph} regions={regions} movements={movements} onRegionClick={onRegionClick} />
+        <MapView graph={graph} regions={regions} movements={movements} buildings={buildings} onRegionClick={onRegionClick} />
         {selected && (
           <div className="absolute top-3 left-3 z-10 bg-cp-card border border-cp-border rounded-xl px-3 py-2 text-xs text-cp-text shadow-xl">
             Selected: <b>{graph.regions[selected]?.city || selected}</b> — click a reachable province to move/attack, or click it again to deselect.

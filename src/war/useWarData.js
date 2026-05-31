@@ -7,6 +7,7 @@ export function useWarData(userId) {
   const [regions, setRegions]     = useState({})               // region_id -> row
   const [players, setPlayers]     = useState([])
   const [movements, setMovements] = useState([])
+  const [buildings, setBuildings] = useState([])
   const [loading, setLoading]     = useState(true)
   const graphLoaded = useRef(false)
 
@@ -19,10 +20,11 @@ export function useWarData(userId) {
 
   const loadAll = useCallback(async () => {
     try {
-      const [rRes, pRes, mRes] = await Promise.all([
+      const [rRes, pRes, mRes, bRes] = await Promise.all([
         supabase.from('war_regions').select('*'),
         supabase.from('war_players').select('*'),
         supabase.from('war_movements').select('*').eq('status', 'moving'),
+        supabase.from('war_buildings').select('*'),
       ])
       if (rRes.data) {
         const m = {}
@@ -31,6 +33,7 @@ export function useWarData(userId) {
       }
       if (pRes.data) setPlayers(pRes.data)
       if (mRes.data) setMovements(mRes.data)
+      if (bRes.data) setBuildings(bRes.data)
     } catch (e) {
       console.error('[useWarData] loadAll error', e)
     } finally {
@@ -68,9 +71,16 @@ export function useWarData(userId) {
           return payload.new?.status === 'moving' ? [...filtered, payload.new] : filtered
         })
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'war_buildings' }, payload => {
+        const b = payload.new || payload.old
+        setBuildings(prev => {
+          const filtered = prev.filter(x => x.id !== b?.id)
+          return payload.eventType === 'DELETE' ? filtered : [...filtered, payload.new]
+        })
+      })
       .subscribe()
     return () => supabase.removeChannel(ch)
   }, [userId])
 
-  return { graph, regions, players, movements, loading, setRegions, loadAll }
+  return { graph, regions, players, movements, buildings, loading, setRegions, loadAll }
 }

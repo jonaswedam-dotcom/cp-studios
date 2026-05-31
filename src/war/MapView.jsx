@@ -31,7 +31,7 @@ function regionTotal(region) {
   return UNIT_TYPES.reduce((s, t) => s + (region[t] || 0), 0)
 }
 
-export default function MapView({ graph, regions, movements, onRegionClick }) {
+export default function MapView({ graph, regions, movements, buildings = [], onRegionClick }) {
   const mapRef     = useRef(null)
   const containerRef = useRef(null)
   const markersRef = useRef([])     // unit/HQ markers
@@ -104,13 +104,20 @@ export default function MapView({ graph, regions, movements, onRegionClick }) {
       if (!c) return
       const total = regionTotal(r)
       const el = markerEl({ type: topUnit(r), color: r.color || '#888', count: total, hq: r.is_hq })
+      const bn = buildings.filter((b) => b.region_id === r.region_id).length
+      if (bn > 0) {
+        const dot = document.createElement('div')
+        dot.textContent = '🏗'
+        dot.style.cssText = 'position:absolute;top:-9px;right:-7px;font-size:11px'
+        el.appendChild(dot)
+      }
       const mk = new maplibregl.Marker({ element: el }).setLngLat(c).addTo(map)
       markersRef.current.push(mk)
     })
   }
 
   useEffect(syncOwnership, [regions])
-  useEffect(syncMarkers, [regions, graph])
+  useEffect(syncMarkers, [regions, graph, buildings])
 
   // In-transit movement dots (interpolated each animation frame)
   useEffect(() => {
