@@ -326,11 +326,18 @@ export default function Navbar() {
         {/* Nav + avatar */}
         <div className="flex items-center gap-7">
           <nav className="flex items-center gap-6">
-            {/* War — visible but unclickable (coming soon) */}
-            <span className="text-sm font-medium flex items-center gap-1.5 text-red-400/30 cursor-not-allowed select-none" title="Coming soon">
+            {/* War */}
+            <NavLink
+              to="/war"
+              className={({ isActive }) =>
+                `text-sm font-medium transition-colors duration-150 flex items-center gap-1.5 ${
+                  isActive ? 'text-red-400' : 'text-red-400/60 hover:text-red-400'
+                }`
+              }
+            >
               <SwordIcon />
               War
-            </span>
+            </NavLink>
 
             {[
               { to: '/',        label: 'Home',   icon: null                          },
