@@ -202,10 +202,13 @@ const SPEED_OPTIONS = [
 ]
 
 // ── BettingPanel ───────────────────────────────────────────────────────────────
-function BettingPanel({ bet, onBet, balance, speed, onSpeed }) {
+function BettingPanel({ bet, onBet, balance, speed, onSpeed, safeLanding, onSafeLanding }) {
+  const safeCost  = bet * 50
+  const canAfford = balance >= bet + safeCost
   return (
     <div className="bg-cp-card border border-cp-border rounded-2xl p-4 flex flex-col gap-4">
       <BetChips bet={bet} onBet={onBet} balance={balance} disabled={false} />
+
       <div className="flex items-center justify-between">
         <span className="text-cp-muted text-sm font-semibold">Speed</span>
         <div className="flex gap-2">
@@ -221,6 +224,26 @@ function BettingPanel({ bet, onBet, balance, speed, onSpeed }) {
           ))}
         </div>
       </div>
+
+      {/* Safe Landing toggle */}
+      <label className={`flex items-center justify-between gap-3 cursor-pointer select-none
+        rounded-xl px-3 py-2.5 border transition-all
+        ${safeLanding ? 'border-sky-400/40 bg-sky-400/5' : 'border-cp-border bg-cp-elevated'}
+        ${!canAfford ? 'opacity-40 cursor-not-allowed' : ''}`}>
+        <div>
+          <p className="text-sm font-semibold text-cp-text">🛡️ Safe Landing</p>
+          <p className="text-xs text-cp-muted mt-0.5">
+            +{safeCost.toLocaleString()} coins · win guaranteed even on splash
+          </p>
+        </div>
+        <input
+          type="checkbox"
+          checked={safeLanding}
+          disabled={!canAfford}
+          onChange={e => onSafeLanding(e.target.checked)}
+          className="w-4 h-4 accent-sky-400 cursor-pointer"
+        />
+      </label>
     </div>
   )
 }
@@ -307,6 +330,10 @@ export default function AviamastersGame() {
   const [usedBoosters, setUsedBoosters] = useState(INITIAL_BOOSTERS)
   const [nitroActive,  setNitroActive]  = useState(false)
 
+  const [safeLanding, setSafeLanding] = useState(false)
+  const safeLandingRef = useRef(false)
+  useEffect(() => { safeLandingRef.current = safeLanding }, [safeLanding])
+
   const roundRef       = useRef(null)
   const idxRef         = useRef(-1)
   const multRef        = useRef(1.0)      // running multiplier — avoids stale closure in setInterval
@@ -385,24 +412,28 @@ export default function AviamastersGame() {
   useEffect(() => () => clearInterval(intervalRef.current), [])
 
   function resolveRound(round) {
-    const finalMult = multRef.current
-    if (round.outcome === 'land') {
+    const finalMult        = multRef.current
+    const totalBet         = betRef.current + (safeLandingRef.current ? betRef.current * 50 : 0)
+    const effectiveOutcome = (round.outcome === 'splash' && safeLandingRef.current) ? 'land' : round.outcome
+
+    if (effectiveOutcome === 'land') {
       const win    = Math.floor(betRef.current * Math.min(finalMult, MAX_MULT))
-      const profit = win - betRef.current
+      const profit = win - totalBet
       setGameResult('win')
       setWonAmount(profit)
       setPhase('landed')
-      placeBetRef.current('aviamasters', betRef.current, profit)
+      placeBetRef.current('aviamasters', totalBet, profit)
     } else {
       setGameResult('loss')
-      setWonAmount(betRef.current)
+      setWonAmount(totalBet)
       setPhase('splashed')
-      placeBetRef.current('aviamasters', betRef.current, -betRef.current)
+      placeBetRef.current('aviamasters', totalBet, -totalBet)
     }
   }
 
   function startFlight() {
-    if ((balanceRef.current ?? 0) < betRef.current) return
+    const totalBet = betRef.current + (safeLandingRef.current ? betRef.current * 50 : 0)
+    if ((balanceRef.current ?? 0) < totalBet) return
     const round = generateRound()
     roundRef.current     = round
     idxRef.current       = -1
@@ -491,15 +522,16 @@ export default function AviamastersGame() {
               bet={bet} onBet={setBet}
               balance={balance}
               speed={speed} onSpeed={setSpeed}
+              safeLanding={safeLanding} onSafeLanding={setSafeLanding}
             />
           )}
 
           {isBetting && (
             <button
               onClick={startFlight}
-              disabled={(balance ?? 0) < bet}
+              disabled={(balance ?? 0) < bet + (safeLanding ? bet * 50 : 0)}
               className={`w-full py-3.5 rounded-2xl font-bold text-base tracking-wide transition-all
-                ${(balance ?? 0) < bet
+                ${(balance ?? 0) < bet + (safeLanding ? bet * 50 : 0)
                   ? 'bg-cp-elevated text-cp-muted cursor-not-allowed opacity-50'
                   : 'bg-amber-400 hover:bg-amber-300 text-black shadow-[0_0_24px_rgba(251,191,36,0.3)] hover:shadow-[0_0_32px_rgba(251,191,36,0.45)] active:scale-95'}`}
             >
