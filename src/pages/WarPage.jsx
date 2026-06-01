@@ -9,7 +9,7 @@ import Sidebar from '../war/Sidebar.jsx'
 import BuyUnitsModal from '../war/BuyUnitsModal.jsx'
 import MoveUnitsModal from '../war/MoveUnitsModal.jsx'
 import BuildingsModal from '../war/BuildingsModal.jsx'
-import { UNITS, UNIT_TYPES, START_ARMY, formatDuration } from '../war/units.js'
+import { UNITS, UNIT_TYPES, formatDuration } from '../war/units.js'
 import { describeEvent } from '../war/events.js'
 import { troopCost, armySizeMultiplier } from '../war/economy.js'
 import { emptyStack } from '../war/combat.js'
@@ -104,21 +104,15 @@ function WarGame() {
       const spawn = pickRandomSpawn(graph, claimed, Math.random)
       if (!spawn) { showFlash('The world is full!'); return }
 
-      const { error: pErr } = await supabase.from('war_players').insert({
-        user_id: userId, display_name: userName, color, spawn_region: spawn,
-        shield_until: new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
+      const { data: spawned, error } = await supabase.rpc('war_spawn', {
+        p_region: spawn, p_country: graph.regions[spawn]?.country || null, p_color: color, p_name: userName,
       })
-      const { error: rErr } = await supabase.from('war_regions').upsert({
-        region_id: spawn, country_code: graph.regions[spawn]?.country || null,
-        owner_id: userId, owner_name: userName, color, is_hq: true, ...START_ARMY,
-      }, { onConflict: 'region_id' })
-      if (pErr || rErr) {
-        // Don't claim success on a failed spawn; allow a retry on the next mount.
+      if (error || !spawned) {
         initRef.current = false
         showFlash('Could not join the war — try again in a moment.')
         return
       }
-      showFlash(`You start in ${graph.regions[spawn]?.city || spawn}!`)
+      showFlash(`You start in ${graph.regions[spawned]?.city || spawned}!`)
     })()
   }, [loading, graph, userId, me, regions, players, userName])
 

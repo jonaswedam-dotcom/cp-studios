@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { UNITS } from './units.js'
+import { UNITS, START_ARMY } from './units.js'
 import { COIN_PER_STRENGTH } from './spoils.js'
 import { INCOME_PER_BANK_LEVEL_PER_HOUR, INCOME_PER_PROVINCE_PER_HOUR } from './buildings.js'
 import { RETREAT_FRACTION, RNG_MIN, RNG_SPAN } from './combat.js'
@@ -51,4 +51,9 @@ test('unit strengths match war_stack_strength() in 026', () => {
 test('province income 10/hr matches 027', () => {
   assert.equal(INCOME_PER_PROVINCE_PER_HOUR, 10)
   assert.match(mig('027_war_income_territory.sql'), /provinces\*10|provinces \* 10/)
+})
+
+test('START_ARMY soldiers match war_spawn() in 028', () => {
+  assert.equal(START_ARMY.soldier, 500)
+  assert.match(mig('028_war_spawn.sql'), /true, 500, 0, 0, 0/)
 })
