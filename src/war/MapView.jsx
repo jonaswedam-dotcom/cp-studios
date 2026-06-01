@@ -3,7 +3,7 @@ import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { feature } from 'topojson-client'
 import { markerEl } from './icons.jsx'
-import { UNITS, UNIT_TYPES } from './units.js'
+import { UNIT_TYPES } from './units.js'
 
 const BASE_STYLE = {
   version: 8,
@@ -165,7 +165,9 @@ export default function MapView({ graph, regions, movements, buildings = [], onR
         const from = graph.regions[mv.from_region]?.centroid
         const to   = graph.regions[mv.to_region]?.centroid
         if (!from || !to) return
-        const dur = (UNITS[mv.unit_type]?.travelSeconds || 30) * 1000
+        const dur = (mv.arrives_at && mv.created_at)
+          ? new Date(mv.arrives_at).getTime() - new Date(mv.created_at).getTime()
+          : 1200_000
         const startMs = mv.created_at ? new Date(mv.created_at).getTime() : (new Date(mv.arrives_at).getTime() - dur)
         const t = Math.min(1, Math.max(0, (now - startMs) / dur))
         const lng = from[0] + (to[0] - from[0]) * t
@@ -173,7 +175,10 @@ export default function MapView({ graph, regions, movements, buildings = [], onR
         live.add(mv.id)
         let mk = moveMarkersRef.current[mv.id]
         if (!mk) {
-          const el = markerEl({ type: mv.unit_type, color: '#fff', count: mv.count })
+          const units = mv.units || {}
+          const mvType = UNIT_TYPES.find((t) => (units[t] || 0) > 0) || 'soldier'
+          const mvCount = UNIT_TYPES.reduce((s, t) => s + (units[t] || 0), 0)
+          const el = markerEl({ type: mvType, color: '#fff', count: mvCount })
           el.style.opacity = '0.85'
           mk = new maplibregl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map)
           moveMarkersRef.current[mv.id] = mk

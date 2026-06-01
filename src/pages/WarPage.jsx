@@ -15,6 +15,7 @@ import { troopCost } from '../war/economy.js'
 import { emptyStack } from '../war/combat.js'
 import { costMultiplier, strengthMultiplier, buildingCost, SLOTS_PER_REGION } from '../war/buildings.js'
 import { landNeighbors, airReachable, seaReachable } from '../war/geo.js'
+import { validateMove } from '../war/movement.js'
 import { pickRandomSpawn } from '../war/spawn.js'
 
 // Flip to false to enable the live game.
@@ -152,36 +153,33 @@ function WarGame() {
   }, [busy, me, balance, myRegionRows, regions, graph, userId, adjustBalance, myCostMult])
 
   // ── Send a movement ─────────────────────────────────────────────────────────
-  const handleMove = useCallback(async ({ type, dest, count }) => {
+  const handleMove = useCallback(async ({ dest, stack, mode }) => {
     if (busy || !moveFrom) return
     setBusy(true)
     try {
       const src = regions[moveFrom]
-      if (!src || src.owner_id !== userId || (src[type] || 0) < count) { showFlash('Move no longer valid.'); return }
+      if (!src || src.owner_id !== userId) { showFlash('Move no longer valid.'); return }
+      for (const t of UNIT_TYPES) if ((stack[t] || 0) > (src[t] || 0)) { showFlash('Not enough units.'); return }
+      const v = validateMove(moveFrom, dest, stack, graph)
+      if (v.error) { showFlash(v.error); return }
       const destRow = regions[dest]
       const destShielded = destRow?.owner_id && destRow.owner_id !== userId &&
         players.some((p) => p.user_id === destRow.owner_id && p.shield_until && new Date(p.shield_until) > new Date())
       if (destShielded) { showFlash("That player is shielded — you can't attack yet."); return }
-      const mode = UNITS[type].mode
-      const arrivesAt = new Date(Date.now() + UNITS[type].travelSeconds * 1000).toISOString()
-      // Decrement the source, then create the movement. If the movement insert fails,
-      // restore the source count so the in-transit units aren't silently destroyed.
-      const { error: decErr } = await supabase.from('war_regions')
-        .update({ [type]: (src[type] || 0) - count, updated_at: new Date().toISOString() })
-        .eq('region_id', moveFrom)
+      const arrivesAt = new Date(Date.now() + v.arrivesInSeconds * 1000).toISOString()
+      const dec = {}; for (const t of UNIT_TYPES) dec[t] = (src[t] || 0) - (stack[t] || 0)
+      const { error: decErr } = await supabase.from('war_regions').update({ ...dec, updated_at: new Date().toISOString() }).eq('region_id', moveFrom)
       if (decErr) { showFlash('Move failed.'); return }
       const { error: mvErr } = await supabase.from('war_movements').insert({
-        player_id: userId, from_region: moveFrom, to_region: dest, unit_type: type, count, mode, arrives_at: arrivesAt,
+        player_id: userId, from_region: moveFrom, to_region: dest, units: stack, mode, arrives_at: arrivesAt,
       })
       if (mvErr) {
-        await supabase.from('war_regions')
-          .update({ [type]: (src[type] || 0), updated_at: new Date().toISOString() })
-          .eq('region_id', moveFrom)
+        await supabase.from('war_regions').update({ ...Object.fromEntries(UNIT_TYPES.map((t) => [t, src[t] || 0])), updated_at: new Date().toISOString() }).eq('region_id', moveFrom)
         showFlash('Move failed.'); return
       }
-      showFlash(`${count} ${UNITS[type].label}s en route — arrives in ${formatDuration(UNITS[type].travelSeconds)}`)
+      showFlash(`Force en route — arrives in ${formatDuration(v.arrivesInSeconds)}`)
     } finally { setMoveFrom(null); setSelected(null); setBusy(false) }
-  }, [busy, moveFrom, regions, userId, players])
+  }, [busy, moveFrom, regions, userId, players, graph])
 
   // ── Build / upgrade buildings on an owned province ──────────────────────────
   const handleBuild = useCallback(async (type) => {
