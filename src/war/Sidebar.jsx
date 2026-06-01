@@ -74,13 +74,12 @@ export default function Sidebar({ me, myRegions, myUnits, balance, leaderboard, 
         <div className="bg-cp-elevated border border-cp-border rounded-2xl p-4 space-y-2">
           <p className="text-xs font-semibold text-cp-muted uppercase tracking-wider">How to Play</p>
           <div className="space-y-1.5 text-xs text-cp-muted leading-relaxed">
-            <p>🖱 Click one of your provinces to select it</p>
-            <p>🎯 Click again to choose units + a destination</p>
-            <p>🪖 Soldiers/tanks move to bordering provinces</p>
-            <p>✈️ Jets fly across water to nearby provinces</p>
-            <p>🚢 Warships ferry troops between coastal provinces</p>
-            <p>🏗 Click a province you own again to build/upgrade</p>
-            <p>⚔️ Combat resolves when units arrive</p>
+            <p><span className="text-red-400">⬡</span> Glowing tiles = where you can send troops</p>
+            <p>🎯 Tap a glowing tile → pick how many → go</p>
+            <p>⚔️ Red = attack a player · 🟢 Green = take free land</p>
+            <p>🏗 Tap your own land to build, upgrade or reinforce</p>
+            <p>🪖 Soldiers/tanks hit bordering land · ✈️ jets fly far</p>
+            <p>🚢 Warships ferry troops between coasts</p>
             <p>💰 Buy units with coins; expand to win</p>
           </div>
         </div>

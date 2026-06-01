@@ -17,7 +17,12 @@ export function UnitIcon({ type, className = 'w-4 h-4' }) {
 // Build a DOM element for a MapLibre marker: a colored chip with an optional count badge.
 export function markerEl({ type, color, count, hq = false }) {
   const el = document.createElement('div')
-  el.style.cssText = `width:30px;height:30px;border-radius:8px;background:#0b0b0bdd;border:2px solid ${color};display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.6);color:#fff;position:relative`
+  // No inline `position` here: MapLibre adds `.maplibregl-marker { position:absolute }`
+  // and positions the element via `transform`. An inline `position:relative` would win
+  // over that rule (inline > stylesheet), leaving the marker in normal document flow so
+  // markers stack/spread vertically instead of tracking their lng/lat. The absolute
+  // positioning still anchors the count/HQ badges below (any non-static position does).
+  el.style.cssText = `width:30px;height:30px;border-radius:8px;background:#0b0b0bdd;border:2px solid ${color};display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.6);color:#fff`
   el.innerHTML = `<span style="width:20px;height:20px;display:block">${UNIT_SVG[type] || ''}</span>`
   if (hq) {
     const s = document.createElement('div')

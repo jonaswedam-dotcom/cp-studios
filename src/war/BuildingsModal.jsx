@@ -1,6 +1,6 @@
 import { BUILDINGS, BUILDING_TYPES, SLOTS_PER_REGION, buildingCost } from './buildings.js'
 
-export default function BuildingsModal({ regionName, regionBuildings, balance, onBuild, onUpgrade, onClose, loading }) {
+export default function BuildingsModal({ regionName, regionBuildings, balance, onBuild, onUpgrade, onClose, loading, canReinforce, onReinforce }) {
   const used = regionBuildings.length
   const slotsLeft = SLOTS_PER_REGION - used
 
@@ -8,7 +8,16 @@ export default function BuildingsModal({ regionName, regionBuildings, balance, o
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-md bg-cp-card border border-cp-border rounded-3xl p-6 space-y-4 shadow-2xl">
-        <h3 className="font-display text-lg text-cp-text">Buildings — {regionName}</h3>
+        <h3 className="font-display text-lg text-cp-text">{regionName}</h3>
+
+        {canReinforce && (
+          <button onClick={onReinforce} disabled={loading}
+            className="w-full py-2.5 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-300 hover:bg-sky-500/25 hover:border-sky-500/50 text-sm font-semibold transition-all disabled:opacity-40">
+            🏃 Reinforce from another province
+          </button>
+        )}
+
+        <p className="text-xs text-cp-muted uppercase tracking-wider pt-1">Buildings</p>
         <p className="text-xs text-cp-muted">{slotsLeft} of {SLOTS_PER_REGION} slots free. Economy buildings help your whole empire but are lost if this province is captured.</p>
 
         {/* Existing buildings (upgradeable) */}

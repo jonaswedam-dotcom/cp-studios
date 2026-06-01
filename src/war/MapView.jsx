@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { feature } from 'topojson-client'
@@ -31,18 +31,42 @@ function regionTotal(region) {
   return UNIT_TYPES.reduce((s, t) => s + (region[t] || 0), 0)
 }
 
-export default function MapView({ graph, regions, movements, buildings = [], onRegionClick, highlight }) {
+// A glowing, clickable hexagon badge that marks a province you can act on.
+const TARGET_COLOR = { attack: '#ef4444', expand: '#34d399', reinforce: '#38bdf8' }
+const TARGET_GLYPH = { attack: '⚔', expand: '＋', reinforce: '↑' }
+function targetMarkerEl(kind, onClick) {
+  const color = TARGET_COLOR[kind] || '#e5e7eb'
+  const el = document.createElement('div')
+  el.style.cssText = `width:26px;height:26px;cursor:pointer;display:flex;align-items:center;justify-content:center;` +
+    `clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);background:${color};color:#0b0b0b;` +
+    `font-size:13px;font-weight:800;box-shadow:0 0 0 2px rgba(11,11,11,.65),0 0 14px ${color};` +
+    `animation:war-target-pulse 1.6s ease-in-out infinite`
+  el.textContent = TARGET_GLYPH[kind] || ''
+  el.title = kind === 'attack' ? 'Attack' : kind === 'expand' ? 'Capture' : 'Reinforce'
+  el.addEventListener('click', (e) => { e.stopPropagation(); onClick() })
+  return el
+}
+
+export default function MapView({ graph, regions, movements, buildings = [], onRegionClick, targets = [] }) {
   const mapRef     = useRef(null)
   const containerRef = useRef(null)
   const markersRef = useRef([])     // unit/HQ markers
   const moveMarkersRef = useRef({}) // movement id -> marker
+  const targetMarkersRef = useRef([]) // clickable hexagon target badges
   const readyRef   = useRef(false)
+  const [ready, setReady] = useState(false) // state (not just ref) so paint effects re-run once the map is loaded
   const onClickRef = useRef(onRegionClick)
   const highlightedIdsRef = useRef([]) // ids that currently have 'reach' feature-state set
   useEffect(() => { onClickRef.current = onRegionClick })
 
   // Init map once
   useEffect(() => {
+    if (!document.getElementById('war-target-kf')) {
+      const st = document.createElement('style')
+      st.id = 'war-target-kf'
+      st.textContent = '@keyframes war-target-pulse{0%,100%{transform:scale(1);opacity:.92}50%{transform:scale(1.14);opacity:1}}'
+      document.head.appendChild(st)
+    }
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: BASE_STYLE,
@@ -60,8 +84,10 @@ export default function MapView({ graph, regions, movements, buildings = [], onR
       map.addLayer({
         id: 'province-fills', type: 'fill', source: 'provinces',
         paint: {
-          'fill-color': ['case', ['boolean', ['feature-state', 'owned'], false],
-            ['feature-state', 'color'], 'rgba(255,255,255,0.02)'],
+          'fill-color': ['case',
+            ['boolean', ['feature-state', 'owned'], false], ['feature-state', 'color'],
+            ['==', ['feature-state', 'reach'], 'expand'], 'rgba(52,211,153,0.28)',
+            'rgba(255,255,255,0.02)'],
           'fill-opacity': ['case', ['boolean', ['feature-state', 'owned'], false], 0.55, 0.5],
         },
       })
@@ -69,14 +95,16 @@ export default function MapView({ graph, regions, movements, buildings = [], onR
         id: 'province-lines', type: 'line', source: 'provinces',
         paint: {
           'line-color': ['case',
-            ['==', ['feature-state', 'reach'], 'enemy'], '#ef4444',
-            ['==', ['feature-state', 'reach'], 'open'],  '#e5e7eb',
+            ['==', ['feature-state', 'reach'], 'attack'], '#ef4444',
+            ['==', ['feature-state', 'reach'], 'expand'], '#34d399',
+            ['==', ['feature-state', 'reach'], 'reinforce'], '#38bdf8',
             'rgba(255,255,255,0.15)'],
           'line-width': ['case',
             ['any',
-              ['==', ['feature-state', 'reach'], 'enemy'],
-              ['==', ['feature-state', 'reach'], 'open']],
-            2, 0.5],
+              ['==', ['feature-state', 'reach'], 'attack'],
+              ['==', ['feature-state', 'reach'], 'expand'],
+              ['==', ['feature-state', 'reach'], 'reinforce']],
+            2.5, 0.5],
         },
       })
       map.on('click', 'province-fills', (e) => {
@@ -85,8 +113,7 @@ export default function MapView({ graph, regions, movements, buildings = [], onR
       })
       map.getCanvas().style.cursor = 'pointer'
       readyRef.current = true
-      syncOwnership()
-      syncMarkers()
+      setReady(true) // triggers the paint effects below to re-run with the latest data, now that the source exists
     })
 
     return () => map.remove()
@@ -127,30 +154,29 @@ export default function MapView({ graph, regions, movements, buildings = [], onR
     })
   }
 
-  useEffect(syncOwnership, [regions])
-  useEffect(syncMarkers, [regions, graph, buildings])
+  useEffect(syncOwnership, [regions, ready])
+  useEffect(syncMarkers, [regions, graph, buildings, ready])
 
-  // Highlight reachable provinces when a province is selected
-  useEffect(() => {
+  // Auto-highlight every actionable target (outline + glowing clickable hexagon badge).
+  const syncTargets = () => {
     const map = mapRef.current
-    if (!map || !readyRef.current) return
-    // Clear previous reach states
-    highlightedIdsRef.current.forEach((id) => {
-      map.setFeatureState({ source: 'provinces', id }, { reach: null })
-    })
+    if (!map || !readyRef.current || !graph) return
+    // Clear previous outlines + badges.
+    highlightedIdsRef.current.forEach((id) => map.setFeatureState({ source: 'provinces', id }, { reach: null }))
     highlightedIdsRef.current = []
-    if (!highlight) return
-    const newIds = []
-    highlight.enemy.forEach((id) => {
-      map.setFeatureState({ source: 'provinces', id }, { reach: 'enemy' })
-      newIds.push(id)
+    targetMarkersRef.current.forEach((m) => m.remove())
+    targetMarkersRef.current = []
+    targets.forEach(({ id, kind }) => {
+      map.setFeatureState({ source: 'provinces', id }, { reach: kind })
+      highlightedIdsRef.current.push(id)
+      const c = graph.regions[id]?.centroid
+      if (!c) return
+      const el = targetMarkerEl(kind, () => onClickRef.current(id))
+      const mk = new maplibregl.Marker({ element: el, offset: [0, -20] }).setLngLat(c).addTo(map)
+      targetMarkersRef.current.push(mk)
     })
-    highlight.open.forEach((id) => {
-      map.setFeatureState({ source: 'provinces', id }, { reach: 'open' })
-      newIds.push(id)
-    })
-    highlightedIdsRef.current = newIds
-  }, [highlight])
+  }
+  useEffect(syncTargets, [targets, graph, ready])
 
   // In-transit movement dots (interpolated each animation frame)
   useEffect(() => {

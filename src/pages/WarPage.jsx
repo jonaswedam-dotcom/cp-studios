@@ -14,8 +14,8 @@ import { describeEvent } from '../war/events.js'
 import { troopCost, armySizeMultiplier } from '../war/economy.js'
 import { emptyStack } from '../war/combat.js'
 import { costMultiplier, strengthMultiplier, buildingCost, SLOTS_PER_REGION } from '../war/buildings.js'
-import { landNeighbors, airReachable, seaReachable } from '../war/geo.js'
 import { validateMove } from '../war/movement.js'
+import { computeTargets, sourcesForDest } from '../war/targeting.js'
 import { pickRandomSpawn } from '../war/spawn.js'
 
 // Flip to false to enable the live game.
@@ -51,11 +51,10 @@ function WarGame() {
 
   const { graph, regions, players, movements, buildings, events, loading } = useWarData(userId)
 
-  const [selected, setSelected]   = useState(null)   // region_id (one of mine)
   const [showBuy, setShowBuy]     = useState(false)
-  const [moveFrom, setMoveFrom]   = useState(null)    // region_id for the move modal
-  const [moveDest, setMoveDest]   = useState(null)    // region_id the player clicked as the target
-  const [buildFor, setBuildFor]   = useState(null)    // region_id for the buildings modal
+  const [sendTo, setSendTo]       = useState(null)    // destination region_id for the send panel
+  const [sendSources, setSendSources] = useState([])  // valid {from, mode} launch options for sendTo
+  const [buildFor, setBuildFor]   = useState(null)    // region_id for the buildings/manage panel
   const [busy, setBusy]           = useState(false)
   const [flash, setFlash]         = useState('')
   const initRef = useRef(false)
@@ -149,14 +148,14 @@ function WarGame() {
   }, [busy, me, balance, myRegionRows, regions, graph, userId, adjustBalance, myCostMult, myArmyMult])
 
   // ── Send a movement ─────────────────────────────────────────────────────────
-  const handleMove = useCallback(async ({ dest, stack, mode }) => {
-    if (busy || !moveFrom) return
+  const handleMove = useCallback(async ({ from, dest, stack }) => {
+    if (busy || !from) return
     setBusy(true)
     try {
-      const src = regions[moveFrom]
+      const src = regions[from]
       if (!src || src.owner_id !== userId) { showFlash('Move no longer valid.'); return }
       for (const t of UNIT_TYPES) if ((stack[t] || 0) > (src[t] || 0)) { showFlash('Not enough units.'); return }
-      const v = validateMove(moveFrom, dest, stack, graph)
+      const v = validateMove(from, dest, stack, graph)
       if (v.error) { showFlash(v.error); return }
       const destRow = regions[dest]
       const destShielded = destRow?.owner_id && destRow.owner_id !== userId &&
@@ -164,18 +163,18 @@ function WarGame() {
       if (destShielded) { showFlash("That player is shielded — you can't attack yet."); return }
       const arrivesAt = new Date(Date.now() + v.arrivesInSeconds * 1000).toISOString()
       const dec = {}; for (const t of UNIT_TYPES) dec[t] = (src[t] || 0) - (stack[t] || 0)
-      const { error: decErr } = await supabase.from('war_regions').update({ ...dec, updated_at: new Date().toISOString() }).eq('region_id', moveFrom)
+      const { error: decErr } = await supabase.from('war_regions').update({ ...dec, updated_at: new Date().toISOString() }).eq('region_id', from)
       if (decErr) { showFlash('Move failed.'); return }
       const { error: mvErr } = await supabase.from('war_movements').insert({
-        player_id: userId, from_region: moveFrom, to_region: dest, units: stack, mode, arrives_at: arrivesAt,
+        player_id: userId, from_region: from, to_region: dest, units: stack, mode: v.mode, arrives_at: arrivesAt,
       })
       if (mvErr) {
-        await supabase.from('war_regions').update({ ...Object.fromEntries(UNIT_TYPES.map((t) => [t, src[t] || 0])), updated_at: new Date().toISOString() }).eq('region_id', moveFrom)
+        await supabase.from('war_regions').update({ ...Object.fromEntries(UNIT_TYPES.map((t) => [t, src[t] || 0])), updated_at: new Date().toISOString() }).eq('region_id', from)
         showFlash('Move failed.'); return
       }
       showFlash(`Force en route — arrives in ${formatDuration(v.arrivesInSeconds)}`)
-    } finally { setMoveFrom(null); setMoveDest(null); setSelected(null); setBusy(false) }
-  }, [busy, moveFrom, regions, userId, players, graph])
+    } finally { setSendTo(null); setSendSources([]); setBusy(false) }
+  }, [busy, regions, userId, players, graph])
 
   // ── Build / upgrade buildings on an owned province ──────────────────────────
   const handleBuild = useCallback(async (type) => {
@@ -223,43 +222,35 @@ function WarGame() {
     return () => { alive = false; clearInterval(id) }
   }, [userId, loadBalance])
 
-  // ── Province click: select own → open move modal on second click ────────────
+  // Players who currently can't be attacked (active shield).
+  const shieldedOwnerIds = useMemo(
+    () => new Set(players.filter((p) => p.shield_until && new Date(p.shield_until) > new Date()).map((p) => p.user_id)),
+    [players])
+
+  // Auto-highlight every actionable target across ALL my provinces — no "select a source" step.
+  const targets = useMemo(() => {
+    if (!graph || !userId) return []
+    return computeTargets(regions, graph, { userId, shieldedOwnerIds })
+  }, [graph, userId, regions, shieldedOwnerIds])
+
+  // Can this owned province receive reinforcements from another of mine?
+  const reinforceSources = useCallback(
+    (regionId) => sourcesForDest(regionId, regions, graph, { userId }),
+    [regions, graph, userId])
+
+  // ── Province click: own → manage panel; enemy/neutral → send forces straight away ──
   const onRegionClick = useCallback((regionId) => {
     const row = regions[regionId]
-    if (!selected) {
-      if (row?.owner_id === userId) setSelected(regionId)
-      return
+    if (row?.owner_id === userId) { setBuildFor(regionId); return } // your land: manage / build / reinforce
+    if (row?.owner_id && shieldedOwnerIds.has(row.owner_id)) {
+      showFlash("That player is shielded — you can't attack yet."); return
     }
-    if (regionId === selected) { setBuildFor(selected); setSelected(null); return }
-    const src = regions[selected]
-    if (!src || src.owner_id !== userId) { setSelected(null); return } // lost the source meanwhile
-    const reachableLand = landNeighbors(selected, graph)
-    const reachableAir  = graph ? airReachable(selected, graph, UNITS.jet.airRangeKm) : []
-    const reachableSea  = graph ? seaReachable(selected, graph, UNITS.warship.seaRangeKm) : []
-    const hasLand = (src.soldier || 0) > 0 || (src.tank || 0) > 0
-    const hasJet  = (src.jet || 0) > 0
-    const hasSea  = (src.warship || 0) > 0
-    const canReach = (reachableLand.includes(regionId) && hasLand) || (reachableAir.includes(regionId) && hasJet) || (reachableSea.includes(regionId) && hasSea)
-    const targetShielded = row?.owner_id && row.owner_id !== userId &&
-      players.some((p) => p.user_id === row.owner_id && p.shield_until && new Date(p.shield_until) > new Date())
-    if (canReach && targetShielded) { showFlash("That player is shielded — you can't attack yet."); return }
-    if (canReach) { setMoveFrom(selected); setMoveDest(regionId); return }
-    if (row?.owner_id === userId) setSelected(regionId)
-    else setSelected(null)
-  }, [selected, regions, userId, graph, players])
-
-  const highlight = useMemo(() => {
-    if (!selected || !graph) return null
-    const src = regions[selected]
-    if (!src || src.owner_id !== userId) return null
-    const land = (src.soldier || src.tank) ? landNeighbors(selected, graph) : []
-    const air  = (src.jet) ? airReachable(selected, graph, UNITS.jet.airRangeKm) : []
-    const sea  = (src.warship) ? seaReachable(selected, graph, UNITS.warship.seaRangeKm) : []
-    const reach = new Set([...land, ...air, ...sea])
-    const enemy = [...reach].filter((id) => regions[id]?.owner_id && regions[id].owner_id !== userId)
-    const open  = [...reach].filter((id) => !regions[id]?.owner_id || regions[id].owner_id === userId)
-    return { enemy: new Set(enemy), open: new Set(open) }
-  }, [selected, graph, regions, userId])
+    const sources = sourcesForDest(regionId, regions, graph, { userId })
+    if (!sources.length) {
+      showFlash('Out of range — take an adjacent province, or build jets/warships to reach further.'); return
+    }
+    setSendTo(regionId); setSendSources(sources)
+  }, [regions, userId, graph, shieldedOwnerIds])
 
   const leaderboard = players
     .map((p) => ({ ...p, regionCount: Object.values(regions).filter((r) => r.owner_id === p.user_id).length }))
@@ -278,10 +269,12 @@ function WarGame() {
   return (
     <div className="flex flex-col lg:flex-row h-[calc(100vh-64px)] overflow-hidden bg-[#0a0a0a]">
       {showBuy && <BuyUnitsModal balance={balance} costMult={myCostMult} armyMult={myArmyMult} loading={busy} onConfirm={handleBuy} onClose={() => setShowBuy(false)} />}
-      {moveFrom && <MoveUnitsModal graph={graph} regions={regions} fromRegion={moveFrom} initialDest={moveDest} loading={busy} onConfirm={handleMove} onClose={() => { setMoveFrom(null); setMoveDest(null); setSelected(null) }} />}
+      {sendTo && <MoveUnitsModal graph={graph} regions={regions} dest={sendTo} sources={sendSources} loading={busy} onConfirm={handleMove} onClose={() => { setSendTo(null); setSendSources([]) }} />}
       {buildFor && (
         <BuildingsModal regionName={graph.regions[buildFor]?.city || buildFor}
           regionBuildings={buildingsIn(buildFor)} balance={balance} loading={busy}
+          canReinforce={reinforceSources(buildFor).length > 0}
+          onReinforce={() => { const s = reinforceSources(buildFor); setBuildFor(null); setSendTo(buildFor); setSendSources(s) }}
           onBuild={handleBuild} onUpgrade={handleUpgrade} onClose={() => setBuildFor(null)} />
       )}
 
@@ -298,12 +291,11 @@ function WarGame() {
       )}
 
       <div className="relative flex-1 overflow-hidden">
-        <MapView graph={graph} regions={regions} movements={movements} buildings={buildings} onRegionClick={onRegionClick} highlight={highlight} />
-        {selected && (
-          <div className="absolute top-3 left-3 z-10 bg-cp-card border border-cp-border rounded-xl px-3 py-2 text-xs text-cp-text shadow-xl">
-            Selected: <b>{graph.regions[selected]?.city || selected}</b> — click a reachable province to move/attack, or click it again to deselect.
-          </div>
-        )}
+        <MapView graph={graph} regions={regions} movements={movements} buildings={buildings} onRegionClick={onRegionClick} targets={targets} />
+        <div className="absolute top-3 left-3 z-10 bg-cp-card/90 border border-cp-border rounded-xl px-3 py-2 text-[11px] text-cp-muted shadow-xl backdrop-blur-sm pointer-events-none space-y-0.5">
+          <p className="flex items-center gap-1.5"><span className="text-red-400">⬡</span> Tap a glowing tile to attack / take it</p>
+          <p className="flex items-center gap-1.5"><span className="text-sky-300">⬡</span> Tap your own land to build or reinforce</p>
+        </div>
       </div>
 
       <Sidebar me={me} myRegions={myRegionRows.length} myUnits={myUnits} balance={balance}
