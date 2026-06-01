@@ -420,8 +420,8 @@ export default function AviamastersGame() {
       const dt = Math.min((ts - lastPhysicsRef.current) / 1000, 0.05)
       lastPhysicsRef.current = ts
 
-      const speed     = T_SPEEDS[speedRef.current] ?? T_SPEEDS.walking
-      const effSpeed  = nitroActiveRef.current ? speed * 2 : speed
+      const tSpeed    = T_SPEEDS[speedRef.current] ?? T_SPEEDS.walking
+      const effSpeed  = nitroActiveRef.current ? tSpeed * 2 : tSpeed
       planeTRef.current = Math.min(1, planeTRef.current + effSpeed * dt)
 
       // Trigger badge events by position
@@ -521,6 +521,7 @@ export default function AviamastersGame() {
   function handlePlayAgain() {
     cancelAnimationFrame(physicsRafRef.current)
     physicsRafRef.current  = null
+    lastPhysicsRef.current = null
     planeTRef.current      = 0
     multRef.current        = 1.0
     controlPtsRef.current  = []
