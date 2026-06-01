@@ -61,7 +61,7 @@ function GameBoard({ phase, planeTRef, controlPtsRef, badgesRef, multRef, bet })
       lastDrawRef.current = ts
 
       // Advance local animation timers
-      propAngleRef.current += 0.25
+      propAngleRef.current += 15 * dt
       cloudOffRef.current  += 8 * dt
       timeRef.current      += dt
       if (flashRef.current.timer > 0) {
