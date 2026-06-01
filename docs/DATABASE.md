@@ -11,7 +11,7 @@ policies, and the setup steps.
 > [Security limitations & known gaps](#security-limitations--known-gaps).
 
 All schema is defined in [`../supabase/migrations/`](../supabase/migrations/) as numbered SQL
-files (`001`–`024`). There is no migration runner — run them by hand in the Supabase
+files (`001`–`028`). There is no migration runner — run them by hand in the Supabase
 **SQL Editor**, in order. Migration `024` also needs the **`pg_cron`** extension enabled
 (Database → Extensions) to schedule the CP War server tick.
 
@@ -21,7 +21,7 @@ files (`001`–`024`). There is no migration runner — run them by hand in the 
 
 1. Create a Supabase project; copy the Project URL and anon key into `.env.local`
    (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`).
-2. Run migrations `001` → `024` in order in the SQL Editor. Enable the `pg_cron` extension
+2. Run migrations `001` → `028` in order in the SQL Editor. Enable the `pg_cron` extension
    (Database → Extensions) before/with `024` so the CP War `war-tick` job can be scheduled.
 3. Confirm the public storage bucket `cp-studios` exists (migration `001` creates it).
 4. Enable **Realtime** on the tables that need it (some are enabled in SQL, others must be
@@ -30,6 +30,7 @@ files (`001`–`024`). There is no migration runner — run them by hand in the 
    - `likes`, `comments` — required for live photo reactions (commented hint in `001`).
    - `war_regions`, `war_players`, `war_movements` — required for CP War (commented hint in `019`).
    - `war_buildings` — required for CP War buildings (commented hint in `021`).
+   - `war_events` — added to the `supabase_realtime` publication in migration `025`; confirm it is enabled in **Database → Replication** so clients receive live event toasts.
 5. Make sure an account exists with the **admin email** (see [Admin model](#admin-model)).
 
 ---
@@ -170,8 +171,11 @@ One row per enrolled player.
 | `last_active_at` | timestamptz | default `now()` (migration `022`); stamped on income collect; drives the offline dug-in defence bonus |
 | `created_at`     | timestamptz | default `now()`                                            |
 
-RLS: any authenticated user can `select`; a user can `insert`/`update` only their own row
-(`auth.uid() = user_id`).
+RLS: any authenticated user can `select`. As of migration `028`, `INSERT` and broad `UPDATE`
+are **revoked** from `authenticated`; only `UPDATE (display_name, color, spawn_region)` is
+granted back. Clients can no longer set or extend `shield_until` directly (closes the
+self-shield exploit). Spawn goes through the `war_spawn()` RPC (below); vault and activity
+columns are written only by SECURITY DEFINER functions.
 
 #### `war_regions`
 The map. One row per province (populated lazily as players claim territory).
@@ -216,6 +220,32 @@ RLS: any authenticated user can `select`; a player can `insert`/`update` only th
 (`auth.uid() = player_id`; the `update` policy was tightened from broad-authenticated to
 owner-only in migration `024`). Movement resolution is done **server-side** by `war_tick()`
 (migration `023`); the client only inserts movements.
+
+**`units` jsonb column (migration `026`):** movements now carry a mixed unit stack
+`{soldier, tank, jet, warship}` in `units jsonb` (default `{}`). The legacy `unit_type` (text)
+and `count` (integer) columns remain but are nullable and no longer used by the server tick
+(kept for backward-compatibility). The tick reads `units` exclusively and resolves the whole
+mixed stack as one combined force. Warships ferry land units (capacity 20 land units per
+warship). New helper: `war_stack_strength(jsonb)` — pure, immutable SQL function; mirrors
+`war_unit_strength()` and `src/war/combat.js#stackStrength`.
+
+#### `war_events` (migration `025`)
+Activity log: one row per notable game event written by the server tick.
+
+| Column      | Type        | Notes                                                                   |
+|-------------|-------------|-------------------------------------------------------------------------|
+| `id`        | bigint PK   | generated always as identity                                            |
+| `created_at`| timestamptz | default `now()`                                                         |
+| `player_id` | uuid        | FK → `auth.users` (`on delete cascade`); the affected player            |
+| `kind`      | text        | `captured` \| `lost` \| `defended` \| `attack_failed` \| `bounced` \| `eliminated` |
+| `region_id` | text        | nullable; the province the event concerns                               |
+| `detail`    | jsonb       | default `{}`; extra context (e.g. `{coins, opponent, neutral}`)         |
+
+RLS: `SELECT` only your own rows (`player_id = auth.uid()`). No client insert/update/delete —
+the table is written exclusively by the SECURITY DEFINER tick via `war_log_event(p_player,
+p_kind, p_region, p_detail)`. Added to the `supabase_realtime` publication in migration `025`;
+clients subscribe filtered by `player_id` to receive live toast notifications. The tick prunes
+rows older than 7 days.
 
 #### `war_buildings` (migration `021`)
 Structures placed on a province (max 3 slots per province). Defence buildings (`bunker`,
@@ -264,6 +294,56 @@ client no longer resolves combat.)
 Income vault never decreases if a player loses all banks (cap drops but accrued coins survive
 until collected); attacker/held survivors are floored to ≥1 unit (no 0-unit "ghost" provinces);
 a shielded defender bounces incoming units home only if the origin is still owned by the sender.
+
+### CP War 2.1 — engagement/balance pass (migrations `025`–`028`)
+
+#### Combat v2 — mixed stacks + RNG (migration `026`)
+`war_tick()` is rewritten to resolve a mixed unit stack (`war_movements.units jsonb`) rather
+than a single unit type. Each side's raw strength is multiplied by an independent ±15% RNG
+factor (`effective = strength × (0.85 + random() × 0.30)`) before comparing. On a successful
+attack, survivors of each unit type are scaled by `(a_eff − d_eff) / a_eff`. On a failed
+attack, 25% of each attacker unit type retreats to the origin province (if still owned by the
+sender); the rest are lost. Warships ferry land units (capacity 20 land units per warship).
+
+New helper: `war_stack_strength(s jsonb) → numeric` — immutable; computes
+`soldier×1 + tank×5 + jet×3 + warship×2` for a jsonb stack.
+
+#### Per-province income (migration `027`)
+The income accrual formula is updated: **rate = `banks_level_sum × 50 + province_count × 10`
+coins/hr**; vault cap = `rate × 10h`. The 10 coins/hr/province term is additive with bank
+income (unchanged at 50/level/hr). Players with no banks and no provinces have
+`last_income_at` advanced to `now()` so that acquiring territory later doesn't pay retroactive
+back-income.
+
+#### `war_spawn(p_region, p_country, p_color, p_name)` RPC (migration `028`)
+SECURITY DEFINER; granted to `authenticated`. Atomically creates the `war_players` row and
+the spawn province in `war_regions` (500 soldiers, `is_hq = true`), and sets `shield_until =
+now() + 48h`. Idempotent: if the player already has a `spawn_region`, returns it immediately
+without re-inserting. Raises `'region taken'` if the chosen province already has an owner.
+Clients call `supabase.rpc('war_spawn', ...)` instead of a direct insert.
+
+**Column lockdown (`028`):** `INSERT` and broad `UPDATE` are revoked from `authenticated` on
+`war_players`; only `UPDATE (display_name, color, spawn_region)` is granted back. This means
+clients can no longer set or extend `shield_until` — the self-shield exploit is closed.
+`war_spawn`, `war_collect_income`, and `war_tick` run as the function owner (SECURITY DEFINER)
+and are unaffected by this revoke.
+
+#### Tunable constants (JS ↔ SQL parity)
+The following constants appear in both the migration SQL and `src/war/*.js`, and are enforced
+to match by `src/war/parity.test.js`:
+
+| Constant                | Value      | SQL location  | JS location            |
+|-------------------------|------------|---------------|------------------------|
+| RNG band                | 0.85–1.15  | `026`/`027`   | `combat.js` RNG_MIN/RNG_SPAN |
+| Retreat fraction        | 0.25       | `026`/`027`   | `combat.js` RETREAT_FRACTION |
+| Per-province income     | 10/hr      | `027`         | `buildings.js`         |
+| Bank income rate        | 50/level/hr| `023`–`027`   | `buildings.js`         |
+| Vault cap multiplier    | 10h        | `023`–`027`   | `buildings.js`         |
+| Warship land capacity   | 20         | `026`/`027`   | `units.js`             |
+| Tank cost (client-only) | 400        | —             | `units.js`             |
+
+`src/war/parity.test.js` parses the migration SQL and asserts these values match the JS
+constants. Run `node --test src/war/*.test.js` to verify after changing either side.
 
 ### Direct messages (migration `018`)
 
@@ -348,6 +428,14 @@ Returns all users other than the caller who are either approved in `pending_user
 email matches the hardcoded admin addresses. Intended for the compose/new-thread picker.
 Return columns: `user_id`, `full_name`, `avatar_url`. Reads `auth.users` and `pending_users`
 (needs `SECURITY DEFINER`).
+
+### `war_spawn(p_region text, p_country text, p_color text, p_name text) → text`  (migration `028`)
+Creates a new CP War player and their spawn province atomically. Idempotent: returns the
+existing `spawn_region` if the player is already enrolled. Raises `'region taken'` if the
+target province already has an owner. Sets `shield_until = now() + 48h` on the new player row.
+Returns the spawn `region_id`. Granted to `authenticated`; runs `SECURITY DEFINER` so it can
+bypass the column-level revoke on `war_players` (clients may no longer insert directly or set
+`shield_until`).
 
 ---
 
@@ -444,3 +532,7 @@ behaviour and would need fixing before this app could be exposed to untrusted us
 | `022_war_idle_columns.sql`             | CP War Phase 3: `war_players.vault` + `last_active_at` (idle economy/activity) |
 | `023_war_tick.sql`                     | CP War Phase 3: `war_tick()` + `war_collect_income()` + helpers (server combat/income) |
 | `024_war_cron_and_rls.sql`             | CP War Phase 3: `pg_cron` schedule for `war_tick` + server-authoritative (owner-only) RLS |
+| `025_war_events.sql`                   | CP War 2.1: `war_events` table + `war_log_event()` helper + realtime; tick updated to prune events and call the helper |
+| `026_war_combat_v2.sql`                | CP War 2.1: `war_movements.units jsonb` mixed-stack column + `war_stack_strength()` helper; tick rewritten for mixed-stack combat with ±15% RNG and 25% attacker retreat |
+| `027_war_income_territory.sql`         | CP War 2.1: per-province income — rate = `banks×50 + provinces×10` coins/hr; cap = `rate×10h` |
+| `028_war_spawn.sql`                    | CP War 2.1: `war_spawn()` SECURITY DEFINER RPC; `war_players` column lockdown (revoke INSERT/UPDATE, grant back `display_name`/`color`/`spawn_region` only) |
