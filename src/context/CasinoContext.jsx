@@ -83,33 +83,21 @@ export function CasinoProvider({ children }) {
         })()
       }
 
-      let newBalance = data.balance
-
-      // Check if daily bonus is due
-      const lastBonus = data.last_daily_bonus ? new Date(data.last_daily_bonus) : null
-      const now = new Date()
-      const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-      const isDue = !lastBonus || lastBonus < twentyFourHoursAgo
-
-      if (isDue) {
-        newBalance = newBalance + DAILY_BONUS_AMOUNT
-        const { error: updateError } = await supabase
-          .from('wallets')
-          .update({ balance: newBalance, last_daily_bonus: now.toISOString() })
-          .eq('user_id', userId)
-
-        if (updateError) {
-          console.error('[CasinoContext] daily bonus update error:', updateError)
-          newBalance = data.balance  // revert on error
-        } else {
-          // Show toast for 5 seconds
+      // Apply daily bonus via delta RPC (race-safe: won't clobber concurrent donations).
+      // The RPC checks the 24-hour window server-side and returns the actual balance.
+      const { data: bonusRows, error: bonusErr } = await supabase.rpc('claim_daily_bonus')
+      if (bonusErr) {
+        console.error('[CasinoContext] claim_daily_bonus error:', bonusErr)
+        setBalance(data.balance)
+      } else {
+        const bonusRow = bonusRows?.[0]
+        setBalance(bonusRow?.balance ?? data.balance)
+        if (bonusRow?.bonus_applied) {
           setDailyBonusAmount(DAILY_BONUS_AMOUNT)
           clearTimeout(bonusTimerRef.current)
           bonusTimerRef.current = setTimeout(() => setDailyBonusAmount(0), 5000)
         }
       }
-
-      setBalance(newBalance)
     } else {
       // First visit — create wallet with 1000 starting coins + first daily bonus.
       // Resolve display_name: prefer pending_users.username (set at sign-up,
@@ -206,18 +194,24 @@ export function CasinoProvider({ children }) {
     setBalance(newBalance)
 
     // Serialize the network writes; each one persists the value it accumulated.
+    // settle_bet writes balance as a delta (balance + winAmount) so concurrent
+    // donations are never overwritten by a stale absolute value.
     const run = writeChainRef.current.then(async () => {
-      const [walletRes, historyRes] = await Promise.all([
-        supabase
-          .from('wallets')
-          .update({ balance: newBalance })
-          .eq('user_id', userId),
-        supabase
-          .from('game_history')
-          .insert({ user_id: userId, game, bet, result, payout }),
-      ])
-      if (walletRes.error) console.error('[CasinoContext] wallet update error:', walletRes.error)
-      if (historyRes.error) console.error('[CasinoContext] history insert error:', historyRes.error)
+      const { data: actualBalance, error } = await supabase.rpc('settle_bet', {
+        p_game:       game,
+        p_bet:        bet,
+        p_result:     result,
+        p_payout:     payout,
+        p_win_amount: winAmount,
+      })
+      if (error) {
+        console.error('[CasinoContext] settle_bet error:', error)
+      } else if (actualBalance !== null && actualBalance !== undefined) {
+        // Reconcile local state with the actual DB balance (picks up any donations
+        // that arrived while this write was in flight).
+        balanceRef.current = actualBalance
+        setBalance(actualBalance)
+      }
     })
     writeChainRef.current = run.catch(() => {})
     return run.then(() => newBalance)
@@ -226,15 +220,22 @@ export function CasinoProvider({ children }) {
   // ── Adjust balance directly (used by CP War; no game_history row) ──────────
   const adjustBalance = useCallback(async (delta) => {
     if (!userId) throw new Error('Not authenticated')
-    const newBalance = Math.max(0, (balance ?? 0) + delta)
-    const { error } = await supabase
-      .from('wallets')
-      .update({ balance: newBalance })
-      .eq('user_id', userId)
-    if (error) { console.error('[CasinoContext] adjustBalance error:', error); return balance }
-    setBalance(newBalance)
-    return newBalance
-  }, [userId, balance])
+    // Optimistic local update for instant UI feedback
+    const optimistic = Math.max(0, (balanceRef.current ?? 0) + delta)
+    balanceRef.current = optimistic
+    setBalance(optimistic)
+    // Delta RPC is safe against concurrent donations (no absolute overwrite)
+    const { data: actualBalance, error } = await supabase.rpc('apply_balance_delta', { p_delta: delta })
+    if (error) {
+      console.error('[CasinoContext] adjustBalance error:', error)
+      return optimistic
+    }
+    if (actualBalance !== null && actualBalance !== undefined) {
+      balanceRef.current = actualBalance
+      setBalance(actualBalance)
+    }
+    return actualBalance ?? optimistic
+  }, [userId])
 
   // ── Daily refill (emergency, when broke) ─────────────────────────────────
   const _refillKey = userId ? `cp-studios:casino-refill:${userId}` : null
@@ -293,16 +294,18 @@ export function CasinoProvider({ children }) {
     setAdState({ lastAt: nowIso, date: today, count: newCount })
 
     const run = writeChainRef.current.then(async () => {
-      const { error } = await supabase
-        .from('wallets')
-        .update({
-          balance:           newBalance,
-          last_ad_reward:    nowIso,
-          ad_rewards_date:   today,
-          ad_rewards_count:  newCount,
-        })
-        .eq('user_id', userId)
-      if (error) console.error('[CasinoContext] claimAdReward error:', error)
+      const { data: actualBalance, error } = await supabase.rpc('settle_ad_reward', {
+        p_reward_amount:    AD_REWARD_AMOUNT,
+        p_last_ad_reward:   nowIso,
+        p_ad_rewards_date:  today,
+        p_ad_rewards_count: newCount,
+      })
+      if (error) {
+        console.error('[CasinoContext] claimAdReward error:', error)
+      } else if (actualBalance !== null && actualBalance !== undefined) {
+        balanceRef.current = actualBalance
+        setBalance(actualBalance)
+      }
     })
     writeChainRef.current = run.catch(() => {})
     await run
