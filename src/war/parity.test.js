@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { UNITS } from './units.js'
 import { COIN_PER_STRENGTH } from './spoils.js'
-import { INCOME_PER_BANK_LEVEL_PER_HOUR } from './buildings.js'
+import { INCOME_PER_BANK_LEVEL_PER_HOUR, INCOME_PER_PROVINCE_PER_HOUR } from './buildings.js'
 import { RETREAT_FRACTION, RNG_MIN, RNG_SPAN } from './combat.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -46,4 +46,9 @@ test('unit strengths match war_stack_strength() in 026', () => {
   assert.match(sql, /'tank'\)::numeric,0\)\*5/)
   assert.match(sql, /'jet'\)::numeric,0\)\*3/)
   assert.match(sql, /'warship'\)::numeric,0\)\*2/)
+})
+
+test('province income 10/hr matches 027', () => {
+  assert.equal(INCOME_PER_PROVINCE_PER_HOUR, 10)
+  assert.match(mig('027_war_income_territory.sql'), /provinces\*10|provinces \* 10/)
 })
