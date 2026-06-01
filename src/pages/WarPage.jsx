@@ -11,7 +11,7 @@ import MoveUnitsModal from '../war/MoveUnitsModal.jsx'
 import BuildingsModal from '../war/BuildingsModal.jsx'
 import { UNITS, UNIT_TYPES, START_ARMY, formatDuration } from '../war/units.js'
 import { describeEvent } from '../war/events.js'
-import { troopCost } from '../war/economy.js'
+import { troopCost, armySizeMultiplier } from '../war/economy.js'
 import { emptyStack } from '../war/combat.js'
 import { costMultiplier, strengthMultiplier, buildingCost, SLOTS_PER_REGION } from '../war/buildings.js'
 import { landNeighbors, airReachable, seaReachable } from '../war/geo.js'
@@ -69,6 +69,7 @@ function WarGame() {
   const buildingsIn    = (regionId) => buildings.filter((b) => b.region_id === regionId)
   const myCostMult     = costMultiplier(myBuildings)
   const myStrengthMult = strengthMultiplier(myBuildings)
+  const myArmyMult     = armySizeMultiplier(myUnits)
 
   const now = Date.now()
   const myRegionIds = new Set(myRegionRows.map((r) => r.region_id))
@@ -126,7 +127,7 @@ function WarGame() {
     if (busy || !me) return
     setBusy(true)
     try {
-      const cost = troopCost(type, count, myCostMult)
+      const cost = troopCost(type, count, myCostMult, myArmyMult)
       if ((balance ?? 0) < cost) { showFlash('Not enough coins.'); return }
       let target = myRegionRows.find((r) => r.is_hq) || myRegionRows[0]
       if (!target) {
@@ -281,7 +282,7 @@ function WarGame() {
 
   return (
     <div className="flex flex-col lg:flex-row h-[calc(100vh-64px)] overflow-hidden bg-[#0a0a0a]">
-      {showBuy && <BuyUnitsModal balance={balance} costMult={myCostMult} loading={busy} onConfirm={handleBuy} onClose={() => setShowBuy(false)} />}
+      {showBuy && <BuyUnitsModal balance={balance} costMult={myCostMult} armyMult={myArmyMult} loading={busy} onConfirm={handleBuy} onClose={() => setShowBuy(false)} />}
       {moveFrom && <MoveUnitsModal graph={graph} regions={regions} fromRegion={moveFrom} loading={busy} onConfirm={handleMove} onClose={() => { setMoveFrom(null); setSelected(null) }} />}
       {buildFor && (
         <BuildingsModal regionName={graph.regions[buildFor]?.city || buildFor}
