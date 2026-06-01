@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { GameLayout, BetChips, ResultBanner, formatCoins } from './shared'
 import { useCasino } from '../../context/CasinoContext'
 import {
-  generateRound, SPEEDS, MAX_MULT, WIN_TIERS, applyBooster, assignBadgePositions,
+  generateRound, MAX_MULT, WIN_TIERS, applyBooster, assignBadgePositions,
 } from './aviamastersEngine'
 import {
   CANVAS_W, CANVAS_H,
@@ -372,7 +372,6 @@ export default function AviamastersGame() {
   const [bet,        setBet]        = useState(50)
   const [speed,      setSpeed]      = useState('walking')
   const [multiplier, setMultiplier] = useState(1.00)
-  const [eventIdx,   setEventIdx]   = useState(-1)
   const [flashKind,  setFlashKind]  = useState(null)
   const [gameResult, setGameResult] = useState(null)
   const [wonAmount,  setWonAmount]  = useState(0)
@@ -390,87 +389,78 @@ export default function AviamastersGame() {
   const autoRoundsRef = useRef(0)
   useEffect(() => { autoRoundsRef.current = autoRounds }, [autoRounds])
 
-  const roundRef       = useRef(null)
-  const idxRef         = useRef(-1)
-  const multRef        = useRef(1.0)      // running multiplier — avoids stale closure in setInterval
-  const totalEvtsRef   = useRef(0)
-  const betRef         = useRef(bet)
-  const balanceRef     = useRef(balance)
-  const speedRef       = useRef(speed)
-  const placeBetRef    = useRef(placeBet)
-  const intervalRef    = useRef(null)
+  const roundRef        = useRef(null)
+  // Physics refs (replace old idxRef / totalEvtsRef / intervalRef)
+  const physicsRafRef   = useRef(null)
+  const lastPhysicsRef  = useRef(null)
+  const planeTRef       = useRef(0)
+  const controlPtsRef   = useRef([])
+  const badgesRef       = useRef([])
+  const multRef         = useRef(1.0)
+  // Stable refs for stale-closure safety
+  const betRef          = useRef(bet)
+  const balanceRef      = useRef(balance)
+  const speedRef        = useRef(speed)
+  const placeBetRef     = useRef(placeBet)
+  const nitroActiveRef  = useRef(false)
 
-  // Stub refs for canvas GameBoard — will be wired to physics loop in Task 4
-  const planeTRef      = useRef(0)
-  const controlPtsRef  = useRef([])
-  const badgesRef      = useRef([])
+  useEffect(() => { betRef.current       = bet      }, [bet])
+  useEffect(() => { balanceRef.current   = balance  }, [balance])
+  useEffect(() => { speedRef.current     = speed    }, [speed])
+  useEffect(() => { placeBetRef.current  = placeBet }, [placeBet])
+  useEffect(() => { nitroActiveRef.current = nitroActive }, [nitroActive])
 
-  useEffect(() => { betRef.current     = bet     }, [bet])
-  useEffect(() => { balanceRef.current = balance }, [balance])
-  useEffect(() => { speedRef.current   = speed   }, [speed])
-  useEffect(() => { placeBetRef.current = placeBet }, [placeBet])
-
-  // Inject keyframes once
-  useEffect(() => {
-    const id = 'aviamasters-kf2'
-    if (document.getElementById(id)) return
-    const s = document.createElement('style')
-    s.id = id
-    s.textContent = `
-      @keyframes amPlaneFly {
-        0%,100% { transform: translate(-50%,-50%) translateY(0) rotate(-8deg); }
-        50%     { transform: translate(-50%,-50%) translateY(-4px) rotate(-13deg); }
-      }
-      @keyframes amBump {
-        0%   { transform: translate(-50%,-50%) scale(1); }
-        40%  { transform: translate(-50%,-50%) scale(1.18); }
-        100% { transform: translate(-50%,-50%) scale(1); }
-      }
-      @keyframes amWave {
-        0%,100% { transform: translateX(0); }
-        50%     { transform: translateX(-18px); }
-      }
-    `
-    document.head.appendChild(s)
-  }, [])
-
-  // Flight loop — reads from roundRef so it stays current after booster mutations
+  // Physics loop — rAF replaces setInterval; nitroActiveRef is read each frame
   useEffect(() => {
     if (phase !== 'flying') return
-    const baseTick = SPEEDS[speedRef.current] ?? SPEEDS.walking
-    const tick     = nitroActive ? Math.floor(baseTick / 2) : baseTick
+    lastPhysicsRef.current = null
 
-    intervalRef.current = setInterval(() => {
-      const round   = roundRef.current        // fresh read each tick
-      const nextIdx = idxRef.current + 1
+    function physicsFrame(ts) {
+      if (!lastPhysicsRef.current) lastPhysicsRef.current = ts
+      const dt = Math.min((ts - lastPhysicsRef.current) / 1000, 0.05)
+      lastPhysicsRef.current = ts
 
-      if (nextIdx >= round.events.length) {
-        clearInterval(intervalRef.current)
-        resolveRound(round)
+      const speed     = T_SPEEDS[speedRef.current] ?? T_SPEEDS.walking
+      const effSpeed  = nitroActiveRef.current ? speed * 2 : speed
+      planeTRef.current = Math.min(1, planeTRef.current + effSpeed * dt)
+
+      // Trigger badge events by position
+      for (const badge of badgesRef.current) {
+        if (!badge.applied && planeTRef.current >= badge.t) {
+          badge.applied = true
+          applyBadgeEvent(badge)
+        }
+      }
+
+      if (planeTRef.current >= 1) {
+        resolveRound(roundRef.current)
         return
       }
 
-      const ev = round.events[nextIdx]
-      idxRef.current = nextIdx
-      setEventIdx(nextIdx)
+      physicsRafRef.current = requestAnimationFrame(physicsFrame)
+    }
 
-      if (!ev.skipped) {
-        let m = multRef.current
-        if      (ev.kind === 'rocket') m = m / 2
-        else if (ev.kind === 'mult')   m = Math.min(MAX_MULT, m * ev.value)
-        else if (ev.kind === 'add')    m = Math.min(MAX_MULT, m + ev.value)
-        m = Math.round(m * 100) / 100
-        multRef.current = m
-        setMultiplier(m)
-        setFlashKind(ev.kind)
-      }
-    }, tick)
+    physicsRafRef.current = requestAnimationFrame(physicsFrame)
+    return () => {
+      cancelAnimationFrame(physicsRafRef.current)
+      physicsRafRef.current = null
+    }
+  }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
 
-    return () => clearInterval(intervalRef.current)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, nitroActive])
+  // Cleanup on unmount
+  useEffect(() => () => cancelAnimationFrame(physicsRafRef.current), [])
 
-  useEffect(() => () => clearInterval(intervalRef.current), [])
+  function applyBadgeEvent(badge) {
+    if (badge.skipped) return
+    let m = multRef.current
+    if      (badge.kind === 'rocket') m = m / 2
+    else if (badge.kind === 'mult')   m = Math.min(MAX_MULT, m * badge.value)
+    else if (badge.kind === 'add')    m = Math.min(MAX_MULT, m + badge.value)
+    m = Math.round(m * 100) / 100
+    multRef.current = m
+    setMultiplier(m)
+    setFlashKind(badge.kind)
+  }
 
   function resolveRound(round) {
     const finalMult        = multRef.current
@@ -483,13 +473,11 @@ export default function AviamastersGame() {
       setGameResult('win')
       setWonAmount(profit)
       setPhase('landed')
-      if (finalMult >= WIN_TIERS.SUPER_MEGA) {
-        setWinTier('SUPER_MEGA')
-        setAutoRounds(0)  // pause autoplay — player must manually continue after Super Mega Win
-      }
-      else if (finalMult >= WIN_TIERS.MEGA)       setWinTier('MEGA')
-      else if (finalMult >= WIN_TIERS.BIG)        setWinTier('BIG')
       placeBetRef.current('aviamasters', totalBet, profit)
+
+      if      (finalMult >= WIN_TIERS.SUPER_MEGA) { setWinTier('SUPER_MEGA'); setAutoRounds(0) }
+      else if (finalMult >= WIN_TIERS.MEGA)         setWinTier('MEGA')
+      else if (finalMult >= WIN_TIERS.BIG)          setWinTier('BIG')
     } else {
       setGameResult('loss')
       setWonAmount(totalBet)
@@ -497,49 +485,54 @@ export default function AviamastersGame() {
       placeBetRef.current('aviamasters', totalBet, -totalBet)
     }
 
-    // Autoplay: queue next round, or stop if rounds exhausted
     const isSuperMega = effectiveOutcome === 'land' && finalMult >= WIN_TIERS.SUPER_MEGA
     if (!isSuperMega && autoRoundsRef.current > 1) {
-      setTimeout(() => {
-        setAutoRounds(prev => prev - 1)
-        setAutoStartPending(true)
-      }, 900)
+      setTimeout(() => { setAutoRounds(prev => prev - 1); setAutoStartPending(true) }, 900)
     } else if (!isSuperMega) {
       setAutoRounds(0)
     }
-    // isSuperMega: setAutoRounds(0) already called above; no further scheduling needed
   }
 
   function startFlight() {
     const totalBet = betRef.current + (safeLandingRef.current ? betRef.current * 50 : 0)
     if ((balanceRef.current ?? 0) < totalBet) return
+
     const round = generateRound()
-    roundRef.current     = round
-    idxRef.current       = -1
-    multRef.current      = 1.0
-    totalEvtsRef.current = round.events.length
-    setEventIdx(-1)
+    const { controlPts, badges } = assignBadgePositions(round.events, round.outcome)
+
+    roundRef.current       = round
+    controlPtsRef.current  = controlPts
+    badgesRef.current      = badges
+    planeTRef.current      = 0
+    multRef.current        = 1.0
+    lastPhysicsRef.current = null
+
     setMultiplier(1.00)
     setFlashKind(null)
     setGameResult(null)
     setWonAmount(0)
     setUsedBoosters(INITIAL_BOOSTERS)
     setNitroActive(false)
+    nitroActiveRef.current = false
+    setWinTier(null)
     setPhase('flying')
   }
 
   function handlePlayAgain() {
-    clearInterval(intervalRef.current)
-    idxRef.current  = -1
-    multRef.current = 1.0
+    cancelAnimationFrame(physicsRafRef.current)
+    physicsRafRef.current  = null
+    planeTRef.current      = 0
+    multRef.current        = 1.0
+    controlPtsRef.current  = []
+    badgesRef.current      = []
     setPhase('betting')
     setMultiplier(1.00)
-    setEventIdx(-1)
     setFlashKind(null)
     setGameResult(null)
     setWonAmount(0)
     setUsedBoosters(INITIAL_BOOSTERS)
     setNitroActive(false)
+    nitroActiveRef.current = false
     setWinTier(null)
     setAutoRounds(0)
     setAutoStartPending(false)
@@ -547,11 +540,16 @@ export default function AviamastersGame() {
 
   function handleBoosterActivate(kind) {
     if (!roundRef.current || usedBoosters[kind]) return
-    const { events, outcome } = roundRef.current
-    const result = applyBooster(events, idxRef.current, kind, outcome)
-    roundRef.current = { ...roundRef.current, events: result.events, outcome: result.outcome }
+    const currentIdx = badgesRef.current.reduce((max, b, i) => b.applied ? i : max, -1)
+    const { events: newBadges, outcome: newOutcome } =
+      applyBooster(badgesRef.current, currentIdx, kind, roundRef.current.outcome)
+    badgesRef.current = newBadges
+    roundRef.current  = { ...roundRef.current, outcome: newOutcome }
     setUsedBoosters(prev => ({ ...prev, [kind]: true }))
-    if (kind === 'nitro') setNitroActive(true)
+    if (kind === 'nitro') {
+      nitroActiveRef.current = true
+      setNitroActive(true)
+    }
   }
 
   useEffect(() => {
@@ -574,17 +572,6 @@ export default function AviamastersGame() {
   const isBetting = phase === 'betting'
   const isFlying  = phase === 'flying'
   const isResult  = phase === 'landed' || phase === 'splashed'
-
-  const total  = totalEvtsRef.current || 1
-  const planeT = isResult ? 1 : isFlying ? Math.min(1, (eventIdx + 1) / total) : 0
-
-  const round  = roundRef.current
-  const badges = (round?.events ?? []).map((ev, i) => ({
-    ...ev,
-    idx:       i,
-    t:         (i + 1) / (round.events.length || 1),
-    collected: i <= eventIdx,
-  }))
 
   return (
     <GameLayout title="Aviamasters">
