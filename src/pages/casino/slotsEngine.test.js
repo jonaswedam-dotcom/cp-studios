@@ -73,6 +73,33 @@ test('5-of-a-kind diamond pays the 300x jackpot', () => {
   assert.deepEqual(lines[0].cells, [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4]])
 })
 
+test('4-of-a-kind star on the top row pays 15x', () => {
+  const { totalReturn, lines } = evaluateGrid(gridOf([
+    [STAR, STAR, STAR, STAR, CHERRY],
+    [CHERRY, LEMON, SEVEN, CHERRY, LEMON],
+    [LEMON, CHERRY, LEMON, SEVEN, CHERRY],
+  ]))
+  assert.equal(totalReturn, 15)
+  assert.equal(lines.length, 1)
+  assert.equal(lines[0].lineIndex, 0)
+  assert.equal(lines[0].runLength, 4)
+  assert.equal(lines[0].multiplier, 15)
+  assert.deepEqual(lines[0].cells, [[0, 0], [0, 1], [0, 2], [0, 3]])
+})
+
+test('the Λ diagonal line is evaluated', () => {
+  // Λ path (2,0)(1,1)(0,2)(1,3)(2,4): 3 sevens on the first three cells
+  const { lines } = evaluateGrid(gridOf([
+    [CHERRY, LEMON, SEVEN, STAR, DIAMOND],
+    [LEMON, SEVEN, CHERRY, LEMON, STAR],
+    [SEVEN, CHERRY, LEMON, CHERRY, LEMON],
+  ]))
+  const lambda = lines.find((l) => l.lineIndex === 4)
+  assert.ok(lambda, 'Λ diagonal should win')
+  assert.equal(lambda.symbol, SEVEN)
+  assert.equal(lambda.runLength, 3)
+})
+
 test('winnings stack across multiple lines', () => {
   // top: 3 stars (5x) + middle: 3 sevens (3x) = 8x
   const { totalReturn, lines } = evaluateGrid(gridOf([

@@ -20,6 +20,7 @@ function initialGrid() {
 
 function describe(lines, totalReturn) {
   if (lines.length === 0) return 'No win'
+  // 1× is the minimum payout (cherry/lemon ×3), so totalReturn === 1 is exactly one push line.
   if (totalReturn === 1) return 'Push — 3 of a kind, bet returned'
   if (lines.length === 1) {
     const l = lines[0]
@@ -117,6 +118,7 @@ export default function SlotsGame() {
     setResultAmount(0)
     setResultLabel('')
     setWinCells(new Set())
+    timeoutRefs.current = [] // prior spin's timeouts have all fired by now
 
     const finalGrid = spinGrid()
     setSpinningCols(Array(REELS).fill(true))
