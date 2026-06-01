@@ -112,5 +112,5 @@ test('applyBooster life_buoy flips splash to land without changing events', () =
   const events = makeEvents('add', 'rocket')
   const { events: out, outcome } = applyBooster(events, 0, 'life_buoy', 'splash')
   assert.equal(outcome, 'land')
-  assert.deepEqual(out, events)
+  assert.strictEqual(out, events)
 })

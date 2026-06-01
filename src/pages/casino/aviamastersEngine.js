@@ -103,6 +103,10 @@ function round2(n) {
   return Math.round(n * 100) / 100
 }
 
+// NOTE: booster mutations change kind/value/skipped but do NOT recalculate multAfter.
+// The flight loop recomputes the running multiplier from kind/value on each tick
+// and never reads multAfter, so stale multAfter on mutated events is safe.
+//
 // Applies a one-shot booster to the remaining unprocessed events.
 // currentIdx: index of the last event already applied (-1 if none yet).
 // Returns { events: newEventArray, outcome: possiblyFlippedOutcome }.
@@ -119,8 +123,10 @@ export function applyBooster(events, currentIdx, boosterKind, outcome) {
     }
     case 'magnet': {
       const ri = remaining.findIndex(e => e.kind === 'rocket' && !e.skipped)
-      const newRemaining = ri === -1 ? remaining
-        : remaining.map((e, i) => i === ri ? { ...e, kind: 'add', value: 0.5 } : e)
+      if (ri === -1) return { events, outcome }
+      const newRemaining = remaining.map((e, i) =>
+        i === ri ? { ...e, kind: 'add', value: 0.5 } : e
+      )
       return {
         events: [...before, ...newRemaining],
         outcome: outcome === 'splash' ? 'land' : outcome,
