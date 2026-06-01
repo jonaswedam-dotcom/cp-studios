@@ -226,10 +226,10 @@ function BettingPanel({ bet, onBet, balance, speed, onSpeed, safeLanding, onSafe
       </div>
 
       {/* Safe Landing toggle */}
-      <label className={`flex items-center justify-between gap-3 cursor-pointer select-none
+      <label className={`flex items-center justify-between gap-3 select-none
         rounded-xl px-3 py-2.5 border transition-all
         ${safeLanding ? 'border-sky-400/40 bg-sky-400/5' : 'border-cp-border bg-cp-elevated'}
-        ${!canAfford ? 'opacity-40 cursor-not-allowed' : ''}`}>
+        ${!canAfford ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
         <div>
           <p className="text-sm font-semibold text-cp-text">🛡️ Safe Landing</p>
           <p className="text-xs text-cp-muted mt-0.5">
@@ -241,7 +241,7 @@ function BettingPanel({ bet, onBet, balance, speed, onSpeed, safeLanding, onSafe
           checked={safeLanding}
           disabled={!canAfford}
           onChange={e => onSafeLanding(e.target.checked)}
-          className="w-4 h-4 accent-sky-400 cursor-pointer"
+          className={`w-4 h-4 accent-sky-400 ${canAfford ? 'cursor-pointer' : 'cursor-not-allowed'}`}
         />
       </label>
     </div>
