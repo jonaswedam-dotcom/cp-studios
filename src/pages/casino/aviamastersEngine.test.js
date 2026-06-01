@@ -5,6 +5,7 @@ import {
   generateRound,
   MAX_MULT,
   START_MULT,
+  applyBooster,
 } from './aviamastersEngine.js'
 
 // Deterministic RNG that replays a fixed queue of values, then 0.
@@ -68,4 +69,48 @@ test('a rocket halves the running multiplier', () => {
   assert.equal(r.events[0].kind, 'rocket')
   assert.equal(r.events[0].multAfter, START_MULT / 2)
   assert.equal(r.finalMult, START_MULT / 2)
+})
+
+// Build a minimal events array where each entry has kind, value, multAfter.
+function makeEvents(...kinds) {
+  let mult = 1
+  return kinds.map(kind => {
+    if (kind === 'rocket') mult = mult / 2
+    else if (kind === 'add')  mult = mult + 0.5
+    else if (kind === 'mult') mult = mult * 2
+    return { kind, value: kind === 'rocket' ? 2 : kind === 'mult' ? 2 : 0.5, multAfter: mult }
+  })
+}
+
+test('applyBooster laser_gun marks the next rocket as skipped', () => {
+  // events: [add, rocket, add] — currentIdx=0 → remaining starts at index 1
+  const events = makeEvents('add', 'rocket', 'add')
+  const { events: out, outcome } = applyBooster(events, 0, 'laser_gun', 'splash')
+  assert.equal(out[1].skipped, true)
+  assert.equal(out.length, 3)
+  assert.equal(outcome, 'splash') // laser_gun does not change outcome
+})
+
+test('applyBooster magnet converts next rocket to add +0.5 and flips splash→land', () => {
+  const events = makeEvents('add', 'rocket', 'add')
+  const { events: out, outcome } = applyBooster(events, 0, 'magnet', 'splash')
+  assert.equal(out[1].kind, 'add')
+  assert.equal(out[1].value, 0.5)
+  assert.equal(outcome, 'land')
+})
+
+test('applyBooster nitro marks all remaining rockets as skipped, non-rockets untouched', () => {
+  // currentIdx=-1 → all events are remaining
+  const events = makeEvents('rocket', 'add', 'rocket')
+  const { events: out } = applyBooster(events, -1, 'nitro', 'land')
+  assert.equal(out[0].skipped, true)
+  assert.equal(out[1].skipped, undefined)
+  assert.equal(out[2].skipped, true)
+})
+
+test('applyBooster life_buoy flips splash to land without changing events', () => {
+  const events = makeEvents('add', 'rocket')
+  const { events: out, outcome } = applyBooster(events, 0, 'life_buoy', 'splash')
+  assert.equal(outcome, 'land')
+  assert.deepEqual(out, events)
 })

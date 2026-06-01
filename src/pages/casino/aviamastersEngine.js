@@ -56,6 +56,8 @@ export const SPEEDS = {
   lightning: 180,
 }
 
+export const WIN_TIERS = { BIG: 20, MEGA: 40, SUPER_MEGA: 80 }
+
 // Pick a value from a [{ value, weight }] table using one rng() draw.
 export function pickWeighted(table, rng) {
   const total = table.reduce((sum, e) => sum + e.weight, 0)
@@ -99,4 +101,40 @@ export function generateRound(rng = Math.random) {
 
 function round2(n) {
   return Math.round(n * 100) / 100
+}
+
+// Applies a one-shot booster to the remaining unprocessed events.
+// currentIdx: index of the last event already applied (-1 if none yet).
+// Returns { events: newEventArray, outcome: possiblyFlippedOutcome }.
+export function applyBooster(events, currentIdx, boosterKind, outcome) {
+  const before    = events.slice(0, currentIdx + 1)
+  const remaining = events.slice(currentIdx + 1)
+
+  switch (boosterKind) {
+    case 'laser_gun': {
+      const ri = remaining.findIndex(e => e.kind === 'rocket' && !e.skipped)
+      if (ri === -1) return { events, outcome }
+      const newRemaining = remaining.map((e, i) => i === ri ? { ...e, skipped: true } : e)
+      return { events: [...before, ...newRemaining], outcome }
+    }
+    case 'magnet': {
+      const ri = remaining.findIndex(e => e.kind === 'rocket' && !e.skipped)
+      const newRemaining = ri === -1 ? remaining
+        : remaining.map((e, i) => i === ri ? { ...e, kind: 'add', value: 0.5 } : e)
+      return {
+        events: [...before, ...newRemaining],
+        outcome: outcome === 'splash' ? 'land' : outcome,
+      }
+    }
+    case 'nitro': {
+      const newRemaining = remaining.map(e =>
+        e.kind === 'rocket' ? { ...e, skipped: true } : e
+      )
+      return { events: [...before, ...newRemaining], outcome }
+    }
+    case 'life_buoy':
+      return { events, outcome: outcome === 'splash' ? 'land' : outcome }
+    default:
+      return { events, outcome }
+  }
 }
