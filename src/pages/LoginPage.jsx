@@ -218,6 +218,16 @@ export default function LoginPage() {
           {/* ── Signup Form ── */}
           {tab === 'signup' && signupDone === null && (
             <form onSubmit={handleSignup} className="space-y-5">
+              {/* Invite-only notice */}
+              <div className="flex gap-3 px-4 py-3 rounded-xl bg-cp-elevated border border-cp-border">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-cp-muted/70 flex-shrink-0 mt-0.5">
+                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                <p className="text-xs text-cp-muted leading-relaxed">
+                  This is an invite-only community. After submitting, your account will need to be approved before you can sign in.
+                </p>
+              </div>
+
               {signupError && <Banner message={signupError} variant="error" />}
 
               <InputField

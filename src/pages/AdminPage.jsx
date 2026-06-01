@@ -180,7 +180,15 @@ export default function AdminPage() {
       setPendingUsers(prev => prev.filter(u => u.id !== user.id))
       setRemovingIds(prev => { const s = new Set(prev); s.delete(user.id); return s })
 
-      if (action === 'approve') fetchApproved()
+      if (action === 'approve') {
+        fetchApproved()
+        // Fire-and-forget approval email — don't block the UI on delivery
+        fetch('/api/notify-approval', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: user.email, username: user.username }),
+        }).catch(err => console.error('[AdminPage] approval email failed:', err))
+      }
     }, 320)
   }
 
