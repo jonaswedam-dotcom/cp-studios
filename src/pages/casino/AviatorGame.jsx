@@ -98,6 +98,7 @@ export default function AviatorGame() {
   const startTimeRef = useRef(0)
   const rafRef = useRef(null)
   const multiplierRef = useRef(1.0)
+  const settledRef = useRef(false) // ensures a round settles (pays out) exactly once
   const betRef = useRef(bet)
   const placeBetRef = useRef(placeBet)
 
@@ -121,6 +122,8 @@ export default function AviatorGame() {
       const elapsed = (performance.now() - startTimeRef.current) / 1000
       const m = multiplierForElapsed(elapsed)
       if (m >= crashPointRef.current) {
+        if (settledRef.current) return
+        settledRef.current = true
         const cp = crashPointRef.current
         multiplierRef.current = cp
         setMultiplier(cp)
@@ -143,6 +146,7 @@ export default function AviatorGame() {
 
   function startFlight() {
     if ((balance ?? 0) < bet) return
+    settledRef.current = false
     crashPointRef.current = generateCrash()
     multiplierRef.current = 1.0
     startTimeRef.current = performance.now()
@@ -156,6 +160,8 @@ export default function AviatorGame() {
 
   function handleCashOut() {
     if (phase !== 'flying') return
+    if (settledRef.current) return
+    settledRef.current = true
     cancelAnimationFrame(rafRef.current)
     const m = multiplierRef.current
     const win = Math.floor(betRef.current * (m - 1))
@@ -173,6 +179,7 @@ export default function AviatorGame() {
     setPhase('betting')
     setMultiplier(1.0)
     multiplierRef.current = 1.0
+    crashPointRef.current = null
     setCashedOutAt(null)
     setGameResult(null)
     setWonAmount(0)
