@@ -31,13 +31,14 @@ function regionTotal(region) {
   return UNIT_TYPES.reduce((s, t) => s + (region[t] || 0), 0)
 }
 
-export default function MapView({ graph, regions, movements, buildings = [], onRegionClick }) {
+export default function MapView({ graph, regions, movements, buildings = [], onRegionClick, highlight }) {
   const mapRef     = useRef(null)
   const containerRef = useRef(null)
   const markersRef = useRef([])     // unit/HQ markers
   const moveMarkersRef = useRef({}) // movement id -> marker
   const readyRef   = useRef(false)
   const onClickRef = useRef(onRegionClick)
+  const highlightedIdsRef = useRef([]) // ids that currently have 'reach' feature-state set
   useEffect(() => { onClickRef.current = onRegionClick })
 
   // Init map once
@@ -66,7 +67,17 @@ export default function MapView({ graph, regions, movements, buildings = [], onR
       })
       map.addLayer({
         id: 'province-lines', type: 'line', source: 'provinces',
-        paint: { 'line-color': 'rgba(255,255,255,0.15)', 'line-width': 0.5 },
+        paint: {
+          'line-color': ['case',
+            ['==', ['feature-state', 'reach'], 'enemy'], '#ef4444',
+            ['==', ['feature-state', 'reach'], 'open'],  '#e5e7eb',
+            'rgba(255,255,255,0.15)'],
+          'line-width': ['case',
+            ['any',
+              ['==', ['feature-state', 'reach'], 'enemy'],
+              ['==', ['feature-state', 'reach'], 'open']],
+            2, 0.5],
+        },
       })
       map.on('click', 'province-fills', (e) => {
         const f = e.features?.[0]
@@ -118,6 +129,28 @@ export default function MapView({ graph, regions, movements, buildings = [], onR
 
   useEffect(syncOwnership, [regions])
   useEffect(syncMarkers, [regions, graph, buildings])
+
+  // Highlight reachable provinces when a province is selected
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !readyRef.current) return
+    // Clear previous reach states
+    highlightedIdsRef.current.forEach((id) => {
+      map.setFeatureState({ source: 'provinces', id }, { reach: null })
+    })
+    highlightedIdsRef.current = []
+    if (!highlight) return
+    const newIds = []
+    highlight.enemy.forEach((id) => {
+      map.setFeatureState({ source: 'provinces', id }, { reach: 'enemy' })
+      newIds.push(id)
+    })
+    highlight.open.forEach((id) => {
+      map.setFeatureState({ source: 'provinces', id }, { reach: 'open' })
+      newIds.push(id)
+    })
+    highlightedIdsRef.current = newIds
+  }, [highlight])
 
   // In-transit movement dots (interpolated each animation frame)
   useEffect(() => {

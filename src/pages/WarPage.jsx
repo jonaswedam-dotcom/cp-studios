@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { useApp } from '../context/AppContext'
@@ -254,6 +254,19 @@ function WarGame() {
     else setSelected(null)
   }, [selected, regions, userId, graph, players])
 
+  const highlight = useMemo(() => {
+    if (!selected || !graph) return null
+    const src = regions[selected]
+    if (!src || src.owner_id !== userId) return null
+    const land = (src.soldier || src.tank) ? landNeighbors(selected, graph) : []
+    const air  = (src.jet) ? airReachable(selected, graph, UNITS.jet.airRangeKm) : []
+    const sea  = (src.warship) ? seaReachable(selected, graph, UNITS.warship.seaRangeKm) : []
+    const reach = new Set([...land, ...air, ...sea])
+    const enemy = [...reach].filter((id) => regions[id]?.owner_id && regions[id].owner_id !== userId)
+    const open  = [...reach].filter((id) => !regions[id]?.owner_id || regions[id].owner_id === userId)
+    return { enemy: new Set(enemy), open: new Set(open) }
+  }, [selected, graph, regions, userId])
+
   const leaderboard = players
     .map((p) => ({ ...p, regionCount: Object.values(regions).filter((r) => r.owner_id === p.user_id).length }))
     .sort((a, b) => b.regionCount - a.regionCount)
@@ -291,7 +304,7 @@ function WarGame() {
       )}
 
       <div className="relative flex-1 overflow-hidden">
-        <MapView graph={graph} regions={regions} movements={movements} buildings={buildings} onRegionClick={onRegionClick} />
+        <MapView graph={graph} regions={regions} movements={movements} buildings={buildings} onRegionClick={onRegionClick} highlight={highlight} />
         {selected && (
           <div className="absolute top-3 left-3 z-10 bg-cp-card border border-cp-border rounded-xl px-3 py-2 text-xs text-cp-text shadow-xl">
             Selected: <b>{graph.regions[selected]?.city || selected}</b> — click a reachable province to move/attack, or click it again to deselect.
