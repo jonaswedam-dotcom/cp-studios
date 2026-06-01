@@ -254,6 +254,41 @@ function ResultPanel({ phase, multiplier, bet, wonAmount, onPlayAgain }) {
   )
 }
 
+// ── Booster definitions ────────────────────────────────────────────────────────
+const BOOSTER_DEFS = [
+  { key: 'laser_gun', icon: '🔫', label: 'Laser' },
+  { key: 'magnet',    icon: '🧲', label: 'Magnet' },
+  { key: 'nitro',     icon: '⚡',  label: 'Nitro' },
+  { key: 'life_buoy', icon: '🛟',  label: 'Life Buoy' },
+]
+
+function BoosterBar({ usedBoosters, onActivate, isFlying }) {
+  return (
+    <div className="w-full max-w-md flex gap-2">
+      {BOOSTER_DEFS.map(b => {
+        const used = usedBoosters[b.key]
+        return (
+          <button
+            key={b.key}
+            onClick={() => isFlying && !used && onActivate(b.key)}
+            className={`flex-1 flex flex-col items-center gap-1 py-2.5 rounded-xl border
+              text-center transition-all select-none
+              ${used
+                ? 'bg-cp-elevated border-cp-border opacity-40 cursor-default'
+                : isFlying
+                  ? 'bg-cp-elevated border-amber-400/40 hover:border-amber-400 hover:bg-amber-400/10 active:scale-95 cursor-pointer'
+                  : 'bg-cp-elevated border-cp-border opacity-50 cursor-default'
+              }`}
+          >
+            <span className="text-xl leading-none">{used ? '✓' : b.icon}</span>
+            <span className="text-xs text-cp-muted font-semibold">{b.label}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── AviamastersGame ────────────────────────────────────────────────────────────
 export default function AviamastersGame() {
   const { balance, placeBet } = useCasino()
@@ -266,6 +301,13 @@ export default function AviamastersGame() {
   const [flashKind,  setFlashKind]  = useState(null)
   const [gameResult, setGameResult] = useState(null)
   const [wonAmount,  setWonAmount]  = useState(0)
+
+  const INITIAL_BOOSTERS = { laser_gun: false, magnet: false, nitro: false, life_buoy: false }
+
+  const [usedBoosters, setUsedBoosters] = useState(INITIAL_BOOSTERS)
+  const [nitroActive,  setNitroActive]  = useState(false)
+  const nitroActiveRef = useRef(false)
+  useEffect(() => { nitroActiveRef.current = nitroActive }, [nitroActive])
 
   const roundRef       = useRef(null)
   const idxRef         = useRef(-1)
@@ -310,9 +352,10 @@ export default function AviamastersGame() {
   useEffect(() => {
     if (phase !== 'flying') return
     const baseTick = SPEEDS[speedRef.current] ?? SPEEDS.walking
+    const tick     = nitroActive ? Math.floor(baseTick / 2) : baseTick
 
     intervalRef.current = setInterval(() => {
-      const round   = roundRef.current        // ← fresh read each tick
+      const round   = roundRef.current        // fresh read each tick
       const nextIdx = idxRef.current + 1
 
       if (nextIdx >= round.events.length) {
@@ -335,11 +378,11 @@ export default function AviamastersGame() {
         setMultiplier(m)
         setFlashKind(ev.kind)
       }
-    }, baseTick)
+    }, tick)
 
     return () => clearInterval(intervalRef.current)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase])
+  }, [phase, nitroActive])
 
   useEffect(() => () => clearInterval(intervalRef.current), [])
 
@@ -372,6 +415,8 @@ export default function AviamastersGame() {
     setFlashKind(null)
     setGameResult(null)
     setWonAmount(0)
+    setUsedBoosters(INITIAL_BOOSTERS)
+    setNitroActive(false)
     setPhase('flying')
   }
 
@@ -385,6 +430,17 @@ export default function AviamastersGame() {
     setFlashKind(null)
     setGameResult(null)
     setWonAmount(0)
+    setUsedBoosters(INITIAL_BOOSTERS)
+    setNitroActive(false)
+  }
+
+  function handleBoosterActivate(kind) {
+    if (!roundRef.current || usedBoosters[kind]) return
+    const { events, outcome } = roundRef.current
+    const result = applyBooster(events, idxRef.current, kind, outcome)
+    roundRef.current = { ...roundRef.current, events: result.events, outcome: result.outcome }
+    setUsedBoosters(prev => ({ ...prev, [kind]: true }))
+    if (kind === 'nitro') setNitroActive(true)
   }
 
   if (balance === null) {
@@ -423,6 +479,12 @@ export default function AviamastersGame() {
           multiplier={multiplier}
           flashKind={flashKind}
           bet={bet}
+        />
+
+        <BoosterBar
+          usedBoosters={usedBoosters}
+          onActivate={handleBoosterActivate}
+          isFlying={isFlying}
         />
 
         <div className="w-full max-w-md flex flex-col gap-4">
