@@ -6,7 +6,7 @@ const graph = { regions: {
   A: { neighbors: ['B'], coastal: true,  centroid: [0, 0] },
   B: { neighbors: ['A'], coastal: true,  centroid: [0, 1] },
   C: { neighbors: [],    coastal: true,  centroid: [0, 2] },   // not land-adjacent to A
-  X: { neighbors: [],    coastal: false, centroid: [40, 40] }, // far inland
+  X: { neighbors: [],    coastal: false, centroid: [20, 20] }, // ~3100km from A: in jet range, not land/sea reachable
 }}
 
 test('land move with soldiers+tanks arrives at the tank speed', () => {
