@@ -45,12 +45,6 @@ const GAMES = [
     description: 'Cash out before the crash',
   },
   {
-    route:       '/casino/aviamasters',
-    emoji:       '🛩️',
-    name:        'Aviamasters',
-    description: 'Fly, collect multipliers, dodge rockets',
-  },
-  {
     route:       '/casino/chicken-road',
     emoji:       '🐔',
     name:        'Chicken Road',

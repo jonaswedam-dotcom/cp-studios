@@ -13,7 +13,6 @@ import RouletteGame from './pages/casino/RouletteGame'
 import BlackjackGame from './pages/casino/BlackjackGame'
 import SlotsGame from './pages/casino/SlotsGame'
 import AviatorGame from './pages/casino/AviatorGame'
-import AviamastersGame from './pages/casino/AviamastersGame'
 import ChickenRoadGame from './pages/casino/ChickenRoadGame'
 import MinesGame from './pages/casino/MinesGame'
 import PlinkoGame from './pages/casino/PlinkoGame'
@@ -105,11 +104,6 @@ function AppRoutes() {
       <Route path="/casino/aviator" element={
         <ProtectedRoute>
           <WithNav><AviatorGame /></WithNav>
-        </ProtectedRoute>
-      } />
-      <Route path="/casino/aviamasters" element={
-        <ProtectedRoute>
-          <WithNav><AviamastersGame /></WithNav>
         </ProtectedRoute>
       } />
       <Route path="/casino/chicken-road" element={
