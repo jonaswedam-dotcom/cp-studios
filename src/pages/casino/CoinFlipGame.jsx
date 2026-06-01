@@ -49,9 +49,11 @@ export default function CoinFlipGame() {
       setDisplayFace(flipped === 'heads' ? 'H' : 'T')
       setPhase('result')
 
-      const winAmount = won ? bet : -bet
+      // House edge: a fair 50/50 paying 2x has 0% edge. Pay 1.95x (0.95x net profit)
+      // so the house keeps ~2.5% — in line with roulette's even-money bets.
+      const winAmount = won ? Math.floor(bet * 0.95) : -bet
       setGameResult(won ? 'win' : 'loss')
-      setWonAmount(won ? bet : bet)
+      setWonAmount(won ? Math.floor(bet * 0.95) : bet)
 
       placeBet('coin-flip', bet, winAmount)
     }, 1100)

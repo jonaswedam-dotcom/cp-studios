@@ -11,7 +11,7 @@ policies, and the setup steps.
 > [Security limitations & known gaps](#security-limitations--known-gaps).
 
 All schema is defined in [`../supabase/migrations/`](../supabase/migrations/) as numbered SQL
-files (`001`–`029`). There is no migration runner — run them by hand in the Supabase
+files (`001`–`031`). There is no migration runner — run them by hand in the Supabase
 **SQL Editor**, in order. Migration `024` also needs the **`pg_cron`** extension enabled
 (Database → Extensions) to schedule the CP War server tick.
 
@@ -21,7 +21,7 @@ files (`001`–`029`). There is no migration runner — run them by hand in the 
 
 1. Create a Supabase project; copy the Project URL and anon key into `.env.local`
    (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`).
-2. Run migrations `001` → `029` in order in the SQL Editor. Enable the `pg_cron` extension
+2. Run migrations `001` → `031` in order in the SQL Editor. Enable the `pg_cron` extension
    (Database → Extensions) before/with `024` so the CP War `war-tick` job can be scheduled.
 3. Confirm the public storage bucket `cp-studios` exists (migration `001` creates it).
 4. Enable **Realtime** on the tables that need it (some are enabled in SQL, others must be
@@ -131,11 +131,21 @@ approved users in migration `013`).
 | `balance`          | integer     | default `1000`                                   |
 | `last_daily_bonus` | timestamptz | added in `006`; drives the +100/24h bonus        |
 | `display_name`     | text        | added in `012`; denormalized name for leaderboard/gifting |
+| `last_ad_reward`   | timestamptz | added in `031`; last rewarded-ad claim (cooldown)|
+| `ad_rewards_date`  | date        | added in `031`; the day `ad_rewards_count` counts |
+| `ad_rewards_count` | integer     | added in `031`; ads claimed today (daily-cap)    |
 | `created_at`       | timestamptz | default `now()`                                  |
 
 RLS: **any authenticated user can read all wallets** (for the leaderboard) — note this uses the
 working `auth.role() = 'authenticated'` form after migration `014`. A user can insert/update
-only their own wallet. (Migration `016` is a one-off reset of all balances to 1000.)
+only their own wallet. (Migration `016` was a one-off reset of all balances to 1000; migration
+`030` is the current reset — coins-only: wallets→1000 + re-armed daily bonus, war vaults→0.)
+
+The **rewarded-ad** columns (`031`) back a "watch an ad for coins" faucet: `AD_REWARD_AMOUNT`
+(100) coins per ad, a 3-minute cooldown, and a 5/day cap (max 500/day). Like the daily bonus,
+the grant is written client-side (`CasinoContext.claimAdReward`) but the cooldown/cap live in
+these DB columns so they hold across devices. The "ad" itself is a simulated timer modal — there
+is no real ad network (not appropriate for a private app).
 
 > Because direct wallet updates are limited to your own row, **coin gifting cannot be a plain
 > client update** — it goes through the `donate_coins` RPC (below).
@@ -537,3 +547,5 @@ behaviour and would need fixing before this app could be exposed to untrusted us
 | `027_war_income_territory.sql`         | CP War 2.1: per-province income — rate = `banks×50 + provinces×10` coins/hr; cap = `rate×10h` |
 | `028_war_spawn.sql`                    | CP War 2.1: `war_spawn()` SECURITY DEFINER RPC; `war_players` column lockdown (revoke INSERT/UPDATE, grant back `display_name`/`color`/`spawn_region` only) |
 | `029_war_buildings_unique.sql`         | CP War 2.1: dedupe + `UNIQUE(region_id, type)` on `war_buildings` so the tick's `sum(level)` can't double-count duplicate buildings |
+| `030_reset_money.sql`                  | One-off: reset all in-game money (coins-only) — `wallets.balance`→1000, re-arm daily bonus, `war_players.vault`→0, income/activity clocks→`now()`. War map preserved. |
+| `031_ad_rewards.sql`                   | Rewarded-ad faucet: add `wallets.last_ad_reward` / `ad_rewards_date` / `ad_rewards_count` (cooldown + daily cap for "watch an ad for coins") |

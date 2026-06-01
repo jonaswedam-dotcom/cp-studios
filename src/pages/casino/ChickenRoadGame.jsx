@@ -3,7 +3,9 @@ import { GameLayout, BetChips, ResultBanner, formatCoins } from './shared'
 import { useCasino } from '../../context/CasinoContext'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const LANE_MULTIPLIERS = [1.5, 2.2, 3.2, 4.8, 7.2, 11.0, 18.0]
+// Lane 1/2 were player-favored (RTP 108% / 101%). Lowered so every cashout point
+// keeps a positive house edge: lane1 0.72*1.3=93.6%, lane2 0.4608*2.0=92.2%.
+const LANE_MULTIPLIERS = [1.3, 2.0, 3.2, 4.8, 7.2, 11.0, 18.0]
 const SAFE_PROBS       = [0.72, 0.64, 0.56, 0.48, 0.40, 0.32, 0.25]
 const NUM_LANES        = 7
 
