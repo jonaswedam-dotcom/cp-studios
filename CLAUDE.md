@@ -178,6 +178,8 @@ enforced behaviour.
 |----------------------------------------|--------------------------------------------------------|
 | Add/adjust a casino game               | `src/pages/casino/<Game>.jsx` + register in `CasinoPage.jsx` `GAMES` |
 | Change starting coins / daily bonus    | `CasinoContext.jsx` (`DAILY_BONUS_AMOUNT`, start balance) |
+| Tune the rewarded-ad faucet            | `CasinoContext.jsx` (`AD_REWARD_AMOUNT`, `AD_COOLDOWN_MS`, `AD_DAILY_CAP`); columns from migration `031` |
+| Reset all in-game money                | new `supabase/migrations/0NN_*.sql` modeled on `030_reset_money.sql` (coins-only) |
 | Tweak auth / approval flow             | `AppContext.jsx` (login/signup) + `AdminPage.jsx`      |
 | Edit the homepage / intro page         | `src/pages/HomePage.jsx` (+ `src/components/CoinField.jsx`) |
 | Change the theme/colors                | `tailwind.config.js`                                   |
