@@ -16,6 +16,7 @@ test('multiplierForElapsed starts at 1 and grows with time', () => {
   assert.equal(multiplierForElapsed(0), 1)
   assert.ok(multiplierForElapsed(1) > 1)
   assert.ok(multiplierForElapsed(5) > multiplierForElapsed(1))
+  assert.ok(Math.abs(multiplierForElapsed(10) - Math.exp(0.15 * 10)) < 1e-10)
 })
 
 test('pointAt(0) is the bottom-left origin; pointAt(1) is the top-right target', () => {

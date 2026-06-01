@@ -44,7 +44,7 @@ export function tangentDeg(p, dims = DIMS) {
   const cp = Math.min(1, Math.max(0, p))
   const dxdp = x1 - x0
   const dydp = -(y0 - y1) * RISE_EXP * Math.pow(cp, RISE_EXP - 1)
-  return (Math.atan2(dydp, dxdp) * 180) / Math.PI
+  return (Math.atan2(dydp, dxdp) * 180) / Math.PI || 0
 }
 
 // SVG path strings + plane placement for progress p.
@@ -56,6 +56,7 @@ export function buildTrajectory(p, dims = DIMS, steps = 24) {
     .map((pt, i) => `${i === 0 ? 'M' : 'L'}${pt.x.toFixed(2)},${pt.y.toFixed(2)}`)
     .join(' ')
   const last = pts[pts.length - 1]
+  // Fill floods to the board bottom edge (dims.h), not the padded baseline, by design.
   const area = `${line} L${last.x.toFixed(2)},${dims.h} L${pts[0].x.toFixed(2)},${dims.h} Z`
   return { line, area, plane: { x: last.x, y: last.y, angleDeg: tangentDeg(cp, dims) } }
 }
