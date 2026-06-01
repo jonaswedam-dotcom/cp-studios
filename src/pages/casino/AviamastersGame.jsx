@@ -2,194 +2,167 @@ import { useState, useEffect, useRef } from 'react'
 import { GameLayout, BetChips, ResultBanner, formatCoins } from './shared'
 import { useCasino } from '../../context/CasinoContext'
 import {
-  generateRound, SPEEDS, MAX_MULT, WIN_TIERS, applyBooster,
+  generateRound, SPEEDS, MAX_MULT, WIN_TIERS, applyBooster, assignBadgePositions,
 } from './aviamastersEngine'
+import {
+  CANVAS_W, CANVAS_H,
+  splinePoint, splineToCanvas,
+  drawBackground, drawIsland, drawPlane, drawTrail,
+  drawBadge, drawRocket, drawCounterBalance,
+} from './aviamastersCanvas'
 
-// ── Bezier helpers ─────────────────────────────────────────────────────────────
-// All coordinates are in a 0-100 viewBox space.
-const P0 = { x: 8,  y: 82 }  // start (bottom-left)
-const P1 = { x: 55, y: 30 }  // control point
-const P2 = { x: 92, y: 18 }  // end (top-right, near carrier)
+const T_SPEEDS = { tortoise: 0.12, walking: 0.20, hare: 0.35, lightning: 0.65 }
 
-function bezierPoint(t) {
-  const mt = 1 - t
-  return {
-    x: mt * mt * P0.x + 2 * mt * t * P1.x + t * t * P2.x,
-    y: mt * mt * P0.y + 2 * mt * t * P1.y + t * t * P2.y,
-  }
-}
+// ── GameBoard (canvas) ────────────────────────────────────────────────────────
+function GameBoard({ phase, planeTRef, controlPtsRef, badgesRef, multRef, bet }) {
+  const canvasRef   = useRef(null)
+  const drawRafRef  = useRef(null)
 
-function bezierTrailPoints(tEnd) {
-  if (tEnd <= 0) return ''
-  return Array.from({ length: 41 }, (_, i) => {
-    const { x, y } = bezierPoint((i / 40) * tEnd)
-    return `${x.toFixed(1)},${y.toFixed(1)}`
-  }).join(' ')
-}
+  // Local animation state — all refs so draw loop needs no React re-renders
+  const propAngleRef  = useRef(0)
+  const trailRef      = useRef([])      // [{cx, cy}], oldest first
+  const cloudOffRef   = useRef(0)
+  const timeRef       = useRef(0)
+  const lastDrawRef   = useRef(null)
+  const phaseRef      = useRef(phase)
+  const flashRef      = useRef({ kind: null, timer: 0 })
+  const flashScaleRef = useRef(1)
+  const prevMultRef   = useRef(1)
+  const fadeMapRef    = useRef({})      // { badgeIndex: opacity }
 
-// ── Static star field (deterministic, no Math.random) ─────────────────────────
-const STARS = Array.from({ length: 22 }, (_, i) => ({
-  x:  ((i * 97 + 13) * 31) % 100,
-  y:  ((i * 61 + 7)  * 17) % 50,
-  r:  i % 4 === 0 ? 1 : 0.5,
-  op: 0.2 + (i % 6) * 0.07,
-}))
+  // Sync phase into a ref (draw loop reads it without re-subscribing)
+  useEffect(() => {
+    if (phase === 'betting') {
+      trailRef.current   = []
+      fadeMapRef.current = {}
+      prevMultRef.current = 1
+    }
+    phaseRef.current = phase
+  }, [phase])
 
-// ── Multiplier colour ──────────────────────────────────────────────────────────
-function multColor(m, splashed) {
-  if (splashed) return '#f87171'
-  if (m < 2)    return '#86efac'
-  if (m < 5)    return '#fde68a'
-  return '#fdba74'
-}
+  // Apply HiDPI scaling once on mount
+  useEffect(() => {
+    const canvas = canvasRef.current
+    const dpr    = window.devicePixelRatio || 1
+    canvas.width  = CANVAS_W * dpr
+    canvas.height = CANVAS_H * dpr
+    const ctx = canvas.getContext('2d')
+    ctx.scale(dpr, dpr)
+  }, [])
 
-// ── GameBoard ──────────────────────────────────────────────────────────────────
-// Pure display component — no state, no side-effects.
-function GameBoard({ phase, planeT, badges, multiplier, flashKind, bet }) {
-  const isSplashed = phase === 'splashed'
-  const isLanded   = phase === 'landed'
-  const isFlying   = phase === 'flying'
-  const isActive   = isFlying || isLanded || isSplashed
+  // Draw loop — reads all game state from refs, never triggers React renders
+  useEffect(() => {
+    const canvas = canvasRef.current
+    const ctx    = canvas.getContext('2d')
 
-  const { x: planeX, y: planeY } = bezierPoint(Math.min(1, planeT))
-  const color = multColor(multiplier, isSplashed)
+    function draw(ts) {
+      if (!lastDrawRef.current) lastDrawRef.current = ts
+      const dt = Math.min((ts - lastDrawRef.current) / 1000, 0.05)
+      lastDrawRef.current = ts
+
+      // Advance local animation timers
+      propAngleRef.current += 0.25
+      cloudOffRef.current  += 8 * dt
+      timeRef.current      += dt
+      if (flashRef.current.timer > 0) {
+        flashRef.current.timer = Math.max(0, flashRef.current.timer - dt)
+      }
+
+      const currentPhase = phaseRef.current
+      const t            = planeTRef.current
+      const controlPts   = controlPtsRef.current ?? []
+      const badges       = badgesRef.current ?? []
+      const mult         = multRef.current
+
+      // Detect multiplier change → trigger flash
+      if (mult !== prevMultRef.current) {
+        flashRef.current = {
+          kind:  mult > prevMultRef.current ? 'boost' : 'rocket',
+          timer: 0.28,
+        }
+        prevMultRef.current = mult
+      }
+
+      // Update badge fade-out map
+      badges.forEach((b, i) => {
+        if (b.applied) {
+          fadeMapRef.current[i] = Math.max(0.12, (fadeMapRef.current[i] ?? 1) - dt * 3)
+        } else {
+          if (fadeMapRef.current[i] === undefined) fadeMapRef.current[i] = 1
+        }
+      })
+
+      // Update smoke trail during active flight
+      if ((currentPhase === 'flying' || currentPhase === 'landed' || currentPhase === 'splashed')
+          && controlPts.length >= 2) {
+        const pt = splinePoint(Math.min(1, t), controlPts)
+        const { cx, cy } = splineToCanvas(pt)
+        trailRef.current.push({ cx, cy })
+        if (trailRef.current.length > 45) trailRef.current.shift()
+      }
+
+      // ── DRAW ──────────────────────────────────────────────────────────────
+      ctx.clearRect(0, 0, CANVAS_W, CANVAS_H)
+      drawBackground(ctx, cloudOffRef.current, timeRef.current)
+      drawIsland(ctx, 'left',  false)
+      drawIsland(ctx, 'right', currentPhase === 'landed')
+
+      if (currentPhase !== 'betting' && controlPts.length >= 2) {
+        drawTrail(ctx, trailRef.current)
+
+        // Badges
+        badges.forEach((b, i) => {
+          const pt         = splinePoint(b.t, controlPts)
+          const { cx, cy } = splineToCanvas(pt)
+          const opacity    = fadeMapRef.current[i] ?? 1
+          const pulse      = b.applied ? 1 : 1 + 0.04 * Math.sin(timeRef.current * 4.2 + i)
+
+          if (b.kind === 'rocket') {
+            drawRocket(ctx, cx, cy, opacity, !b.skipped && !b.applied)
+          } else {
+            drawBadge(ctx, cx, cy, b.kind, b.value, opacity, pulse)
+          }
+        })
+
+        // Plane
+        const pt1 = splinePoint(Math.min(1, t), controlPts)
+        const pt2 = splinePoint(Math.min(1, t + 0.008), controlPts)
+        const { cx: x1, cy: y1 } = splineToCanvas(pt1)
+        const { cx: x2, cy: y2 } = splineToCanvas(pt2)
+        let angle = Math.atan2(y2 - y1, x2 - x1)
+
+        // Nose-down on splash
+        if (currentPhase === 'splashed') angle = Math.max(angle, 0.6)
+
+        const flashKind = flashRef.current.timer > 0 ? flashRef.current.kind : null
+        drawPlane(ctx, x1, y1, angle, propAngleRef.current, flashKind)
+      }
+
+      // Flash scale for counter balance
+      flashScaleRef.current = flashRef.current.timer > 0
+        ? 1 + 0.18 * (flashRef.current.timer / 0.28)
+        : 1
+      drawCounterBalance(ctx, mult, currentPhase === 'splashed', flashScaleRef.current, bet)
+
+      drawRafRef.current = requestAnimationFrame(draw)
+    }
+
+    drawRafRef.current = requestAnimationFrame(draw)
+    return () => cancelAnimationFrame(drawRafRef.current)
+  }, []) // empty — reads everything from refs
 
   return (
-    <div style={{
-      width: '100%', maxWidth: 448, height: 360,
-      borderRadius: 16, overflow: 'hidden', position: 'relative',
-      border: '1px solid #1f2937',
-      background: 'linear-gradient(180deg, #030712 0%, #0f172a 78%, #0c1425 100%)',
-    }}>
-
-      {/* Stars */}
-      <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
-        viewBox="0 0 100 100" preserveAspectRatio="none">
-        {STARS.map((s, i) => (
-          <circle key={i} cx={s.x} cy={s.y} r={s.r} fill="white" opacity={s.op} />
-        ))}
-      </svg>
-
-      {/* Bezier track (dashed guide line) */}
-      <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
-        viewBox="0 0 100 100" preserveAspectRatio="none">
-        <path
-          d={`M ${P0.x},${P0.y} Q ${P1.x},${P1.y} ${P2.x},${P2.y}`}
-          stroke="#ffffff10" strokeWidth="0.7" strokeDasharray="2,2.5" fill="none"
-        />
-      </svg>
-
-      {/* Trail (coloured polyline up to current planeT) */}
-      {isActive && (
-        <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
-          viewBox="0 0 100 100" preserveAspectRatio="none">
-          <defs>
-            <linearGradient id="amTrail3" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%"   stopColor={color} stopOpacity="0"   />
-              <stop offset="100%" stopColor={color} stopOpacity="0.6" />
-            </linearGradient>
-          </defs>
-          <polyline
-            points={bezierTrailPoints(Math.min(1, planeT))}
-            stroke="url(#amTrail3)" strokeWidth="1.4" fill="none" strokeLinecap="round"
-          />
-        </svg>
-      )}
-
-      {/* Collectible badges (SVG rect+text for add/mult; absolute div for rockets) */}
-      <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
-        viewBox="0 0 100 100" preserveAspectRatio="none">
-        {isActive && badges.filter(b => b.kind !== 'rocket').map((b, i) => {
-          const { x, y } = bezierPoint(b.t)
-          const fill  = b.kind === 'mult' ? '#fbbf24' : '#86efac'
-          const label = b.kind === 'mult' ? `×${b.value}` : `+${b.value}`
-          return (
-            <g key={b.idx} opacity={b.collected ? 0.2 : 1} style={{ transition: 'opacity 0.3s' }}>
-              <rect x={x - 5.5} y={y - 3.2} width={11} height={6.4} rx={1.5} fill={fill} />
-              <text x={x} y={y + 1.3} textAnchor="middle"
-                fontSize="3.2" fontWeight="800" fill="#000">{label}</text>
-            </g>
-          )
-        })}
-      </svg>
-
-      {/* Rocket emoji badges (absolute-positioned divs — SVG can't render emoji reliably) */}
-      {isActive && badges.filter(b => b.kind === 'rocket').map((b, i) => {
-        const { x, y } = bezierPoint(b.t)
-        return (
-          <div key={b.idx} style={{
-            position: 'absolute', left: `${x}%`, top: `${y}%`,
-            transform: 'translate(-50%, -50%)',
-            fontSize: 13, lineHeight: 1,
-            opacity: b.collected ? 0.15 : b.skipped ? 0.35 : 1,
-            filter: b.skipped ? 'grayscale(1)' : undefined,
-            transition: 'opacity 0.3s',
-          }}>
-            🚀
-          </div>
-        )
-      })}
-
-      {/* Ocean strip */}
-      <div style={{
-        position: 'absolute', left: 0, right: 0, bottom: 0, height: '18%',
-        background: 'linear-gradient(180deg, rgba(14,165,233,0.18) 0%, rgba(2,6,23,0.9) 100%)',
-      }}>
-        <div style={{
-          position: 'absolute', top: 0, left: 0, right: 0, height: 4,
-          background: 'repeating-linear-gradient(90deg, transparent 0px, transparent 18px, rgba(56,189,248,0.22) 18px, rgba(56,189,248,0.22) 36px)',
-          animation: 'amWave 3s ease-in-out infinite',
-        }} />
-      </div>
-
-      {/* Aircraft carrier */}
-      <div style={{
-        position: 'absolute', right: '3%', bottom: '17%',
-        fontSize: 22, lineHeight: 1,
-        filter: isLanded ? 'drop-shadow(0 0 10px #fbbf24)' : undefined,
-        transition: 'filter 0.4s',
-      }}>
-        🚢
-      </div>
-
-      {/* Plane */}
-      <div style={{
-        position: 'absolute', left: `${planeX}%`, top: `${planeY}%`,
-        transform: 'translate(-50%, -50%)',
-        fontSize: 24, lineHeight: 1,
-        animation:  isFlying   ? 'amPlaneFly 0.8s ease-in-out infinite' : 'none',
-        filter:     isSplashed ? undefined : `drop-shadow(0 0 8px ${color})`,
-        transition: isFlying   ? 'left 0.18s linear, top 0.18s linear' : 'none',
-      }}>
-        {isSplashed ? '🌊' : isLanded ? '🛬' : '🛩️'}
-      </div>
-
-      {/* Counter Balance readout */}
-      <div style={{
-        position: 'absolute', top: '38%', left: '50%',
-        transform: 'translate(-50%, -50%)', textAlign: 'center', pointerEvents: 'none',
-      }}>
-        <div
-          key={`${multiplier}-${flashKind}`}
-          style={{
-            fontSize: 54, fontWeight: 900, color, lineHeight: 1,
-            textShadow: `0 0 28px ${color}80`, letterSpacing: '-2px',
-            animation: flashKind && isFlying ? 'amBump 0.28s ease-out' : 'none',
-          }}>
-          {multiplier.toFixed(2)}×
-        </div>
-        {isFlying && bet != null && (
-          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
-            Bet: {bet.toLocaleString()} coins
-          </div>
-        )}
-        {isSplashed && (
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#f87171', letterSpacing: 3, marginTop: 4, textTransform: 'uppercase' }}>
-            SPLASH
-          </div>
-        )}
-      </div>
-    </div>
+    <canvas
+      ref={canvasRef}
+      style={{
+        width: '100%',
+        maxWidth: CANVAS_W,
+        height: 'auto',
+        borderRadius: 16,
+        border: '1px solid #1f2937',
+        display: 'block',
+      }}
+    />
   )
 }
 
@@ -427,6 +400,11 @@ export default function AviamastersGame() {
   const placeBetRef    = useRef(placeBet)
   const intervalRef    = useRef(null)
 
+  // Stub refs for canvas GameBoard — will be wired to physics loop in Task 4
+  const planeTRef      = useRef(0)
+  const controlPtsRef  = useRef([])
+  const badgesRef      = useRef([])
+
   useEffect(() => { betRef.current     = bet     }, [bet])
   useEffect(() => { balanceRef.current = balance }, [balance])
   useEffect(() => { speedRef.current   = speed   }, [speed])
@@ -614,10 +592,10 @@ export default function AviamastersGame() {
 
         <GameBoard
           phase={phase}
-          planeT={planeT}
-          badges={badges}
-          multiplier={multiplier}
-          flashKind={flashKind}
+          planeTRef={planeTRef}
+          controlPtsRef={controlPtsRef}
+          badgesRef={badgesRef}
+          multRef={multRef}
           bet={bet}
         />
 
