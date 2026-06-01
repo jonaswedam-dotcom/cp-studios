@@ -8,6 +8,7 @@ export function useWarData(userId) {
   const [players, setPlayers]     = useState([])
   const [movements, setMovements] = useState([])
   const [buildings, setBuildings] = useState([])
+  const [events, setEvents]       = useState([])
   const [loading, setLoading]     = useState(true)
   const graphLoaded = useRef(false)
 
@@ -34,6 +35,9 @@ export function useWarData(userId) {
       if (pRes.data) setPlayers(pRes.data)
       if (mRes.data) setMovements(mRes.data)
       if (bRes.data) setBuildings(bRes.data)
+      supabase.from('war_events').select('*').eq('player_id', userId)
+        .order('created_at', { ascending: false }).limit(50)
+        .then(({ data }) => { if (data) setEvents(data) })
     } catch (e) {
       console.error('[useWarData] loadAll error', e)
     } finally {
@@ -91,9 +95,12 @@ export function useWarData(userId) {
           return isDelete ? filtered : [...filtered, row]
         })
       })
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'war_events', filter: `player_id=eq.${userId}` },
+        ({ new: row }) => setEvents((prev) => [row, ...prev].slice(0, 50)))
       .subscribe()
     return () => supabase.removeChannel(ch)
   }, [userId])
 
-  return { graph, regions, players, movements, buildings, loading, setRegions, loadAll }
+  return { graph, regions, players, movements, buildings, events, loading, setRegions, loadAll }
 }
