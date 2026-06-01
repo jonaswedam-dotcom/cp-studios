@@ -144,3 +144,37 @@ export function applyBooster(events, currentIdx, boosterKind, outcome) {
       return { events, outcome }
   }
 }
+
+// Pre-computes the catmull-rom spline control points and badge t-positions for one round.
+// The trajectory climbs on boost/mult events and dives on rockets.
+// End altitude is forced to match the pre-rolled outcome.
+export function assignBadgePositions(events, outcome) {
+  const N = events.length
+  let altitude = 0.30  // takeoff altitude
+
+  const controlPts = [{ x: 0, altitude }]
+
+  events.forEach((ev, i) => {
+    if (!ev.skipped) {
+      if (ev.kind === 'rocket') {
+        altitude -= 0.22
+      } else if (ev.kind === 'mult') {
+        altitude += Math.min((ev.value - 1) * 0.12, 0.28)
+      } else if (ev.kind === 'add') {
+        altitude += Math.min(ev.value * 0.18, 0.25)
+      }
+      altitude = Math.max(0.08, Math.min(0.92, altitude))
+    }
+    controlPts.push({ x: (i + 1) / (N + 1), altitude })
+  })
+
+  controlPts.push({ x: 1.0, altitude: outcome === 'land' ? 0.82 : 0.06 })
+
+  const badges = events.map((ev, i) => ({
+    ...ev,
+    t: (i + 1) / (N + 1),
+    applied: false,
+  }))
+
+  return { controlPts, badges }
+}

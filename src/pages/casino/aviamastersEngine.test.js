@@ -6,6 +6,7 @@ import {
   MAX_MULT,
   START_MULT,
   applyBooster,
+  assignBadgePositions,
 } from './aviamastersEngine.js'
 
 // Deterministic RNG that replays a fixed queue of values, then 0.
@@ -113,4 +114,38 @@ test('applyBooster life_buoy flips splash to land without changing events', () =
   const { events: out, outcome } = applyBooster(events, 0, 'life_buoy', 'splash')
   assert.equal(outcome, 'land')
   assert.strictEqual(out, events)
+})
+
+test('assignBadgePositions: land outcome produces end altitude >= 0.75', () => {
+  const events = makeEvents('add', 'mult')
+  const { controlPts } = assignBadgePositions(events, 'land')
+  const last = controlPts[controlPts.length - 1]
+  assert.ok(last.altitude >= 0.75, `expected >= 0.75 got ${last.altitude}`)
+})
+
+test('assignBadgePositions: splash outcome produces end altitude <= 0.15', () => {
+  const events = makeEvents('rocket', 'add')
+  const { controlPts } = assignBadgePositions(events, 'splash')
+  const last = controlPts[controlPts.length - 1]
+  assert.ok(last.altitude <= 0.15, `expected <= 0.15 got ${last.altitude}`)
+})
+
+test('assignBadgePositions: intermediate control points clamped to [0.08, 0.92]', () => {
+  const events = makeEvents('rocket', 'rocket', 'rocket', 'rocket', 'rocket')
+  const { controlPts } = assignBadgePositions(events, 'splash')
+  const mid = controlPts.slice(1, -1)
+  for (const pt of mid) {
+    assert.ok(pt.altitude >= 0.08, `altitude ${pt.altitude} below 0.08`)
+    assert.ok(pt.altitude <= 0.92, `altitude ${pt.altitude} above 0.92`)
+  }
+})
+
+test('assignBadgePositions: badges have evenly spaced t-values and applied: false', () => {
+  const events = makeEvents('add', 'rocket', 'mult')
+  const { badges } = assignBadgePositions(events, 'land')
+  assert.equal(badges.length, 3)
+  assert.ok(Math.abs(badges[0].t - 1/4) < 0.001)
+  assert.ok(Math.abs(badges[1].t - 2/4) < 0.001)
+  assert.ok(Math.abs(badges[2].t - 3/4) < 0.001)
+  for (const b of badges) assert.equal(b.applied, false)
 })
