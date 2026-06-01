@@ -17,6 +17,15 @@ export function CasinoProvider({ children }) {
 
   const bonusTimerRef = useRef(null)
 
+  // ── Settlement state for race-free, accumulating bets ──────────────────────
+  // balanceRef always holds the latest balance so concurrently-settling bets
+  // (e.g. multiple Plinko balls in flight) accumulate off a live value instead
+  // of clobbering each other. writeChainRef serializes the wallet writes so the
+  // last write carries the fully-accumulated balance (no lost updates).
+  const balanceRef    = useRef(balance)
+  const writeChainRef = useRef(Promise.resolve())
+  useEffect(() => { balanceRef.current = balance }, [balance])
+
   // ── Load (or create) the wallet row ───────────────────────────────────────
   const loadBalance = useCallback(async () => {
     if (!userId) return
@@ -141,29 +150,40 @@ export function CasinoProvider({ children }) {
 
   // ── Place a bet ───────────────────────────────────────────────────────────
   // winAmount: net change (positive = won, negative = lost, 0 = push)
-  const placeBet = useCallback(async (game, bet, winAmount) => {
+  //
+  // Settlements accumulate off balanceRef.current (the live balance) and write
+  // through a serial chain, so multiple bets resolving close together — e.g.
+  // several Plinko balls landing within the same animation frame — each build on
+  // the previous result instead of all reading the same stale base and
+  // overwriting one another (which silently dropped big wins like a 130× hit).
+  const placeBet = useCallback((game, bet, winAmount) => {
     if (!userId) throw new Error('Not authenticated')
 
-    const newBalance = Math.max(0, (balance ?? 0) + winAmount)
+    const newBalance = Math.max(0, (balanceRef.current ?? 0) + winAmount)
     const result     = winAmount > 0 ? 'win' : winAmount === 0 ? 'push' : 'loss'
     const payout     = winAmount >= 0 ? bet + winAmount : 0
 
-    const [walletRes, historyRes] = await Promise.all([
-      supabase
-        .from('wallets')
-        .update({ balance: newBalance })
-        .eq('user_id', userId),
-      supabase
-        .from('game_history')
-        .insert({ user_id: userId, game, bet, result, payout }),
-    ])
-
-    if (walletRes.error) console.error('[CasinoContext] wallet update error:', walletRes.error)
-    if (historyRes.error) console.error('[CasinoContext] history insert error:', historyRes.error)
-
+    // Apply locally now (sync) so the next settlement sees the updated balance.
+    balanceRef.current = newBalance
     setBalance(newBalance)
-    return newBalance
-  }, [userId, balance])
+
+    // Serialize the network writes; each one persists the value it accumulated.
+    const run = writeChainRef.current.then(async () => {
+      const [walletRes, historyRes] = await Promise.all([
+        supabase
+          .from('wallets')
+          .update({ balance: newBalance })
+          .eq('user_id', userId),
+        supabase
+          .from('game_history')
+          .insert({ user_id: userId, game, bet, result, payout }),
+      ])
+      if (walletRes.error) console.error('[CasinoContext] wallet update error:', walletRes.error)
+      if (historyRes.error) console.error('[CasinoContext] history insert error:', historyRes.error)
+    })
+    writeChainRef.current = run.catch(() => {})
+    return run.then(() => newBalance)
+  }, [userId])
 
   // ── Adjust balance directly (used by CP War; no game_history row) ──────────
   const adjustBalance = useCallback(async (delta) => {
