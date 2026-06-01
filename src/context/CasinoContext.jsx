@@ -7,6 +7,16 @@ export const useCasino = () => useContext(CasinoContext)
 
 const DAILY_BONUS_AMOUNT = 100
 
+// ── Rewarded ads (tunable) ──────────────────────────────────────────────────
+// Coins per watched ad, the minimum gap between ads, and the daily cap. Pegged to
+// the daily bonus (100) so ads top out at 5 * 100 = 500 coins/day. The cooldown +
+// cap are persisted on the wallet (migration 031) so they hold across devices.
+export const AD_REWARD_AMOUNT = 100
+const AD_COOLDOWN_MS = 3 * 60 * 1000 // 3 minutes between ads
+const AD_DAILY_CAP   = 5             // max ads/day -> max 500 coins/day
+
+const _adToday = () => new Date().toISOString().slice(0, 10) // "YYYY-MM-DD" (UTC)
+
 export function CasinoProvider({ children }) {
   const { session } = useApp()
   const userId = session?.user?.id ?? null
@@ -14,6 +24,8 @@ export function CasinoProvider({ children }) {
   const [balance, setBalance]               = useState(null)
   const [loading, setLoading]               = useState(false)
   const [dailyBonusAmount, setDailyBonusAmount] = useState(0)
+  // Ad cooldown/cap state, hydrated from the wallet row in loadBalance().
+  const [adState, setAdState] = useState({ lastAt: null, date: null, count: 0 })
 
   const bonusTimerRef = useRef(null)
 
@@ -33,7 +45,7 @@ export function CasinoProvider({ children }) {
 
     const { data, error } = await supabase
       .from('wallets')
-      .select('balance, last_daily_bonus, display_name')
+      .select('balance, last_daily_bonus, display_name, last_ad_reward, ad_rewards_date, ad_rewards_count')
       .eq('user_id', userId)
       .maybeSingle()
 
@@ -44,6 +56,13 @@ export function CasinoProvider({ children }) {
     }
 
     if (data) {
+      // Hydrate ad cooldown/cap state from the wallet row (columns from migration 031).
+      setAdState({
+        lastAt: data.last_ad_reward ?? null,
+        date:   data.ad_rewards_date ?? null,
+        count:  data.ad_rewards_count ?? 0,
+      })
+
       // Opportunistically backfill display_name for wallets that still have none.
       // pending_users.username is the most reliable source (written at sign-up).
       // Auth metadata (user_metadata.full_name) is a secondary fallback because
@@ -138,6 +157,7 @@ export function CasinoProvider({ children }) {
     if (!userId) {
       setBalance(null)
       setDailyBonusAmount(0)
+      setAdState({ lastAt: null, date: null, count: 0 })
       return
     }
     loadBalance()
@@ -225,6 +245,52 @@ export function CasinoProvider({ children }) {
     return localStorage.getItem(_refillKey) !== _todayStr
   }, [balance, _refillKey, _todayStr])
 
+  // ── Rewarded ads (watch an ad for coins) ──────────────────────────────────
+  const adsLeftToday = useCallback(() => {
+    const used = adState.date === _adToday() ? adState.count : 0
+    return Math.max(0, AD_DAILY_CAP - used)
+  }, [adState])
+
+  const canClaimAd = useCallback(() => {
+    if (!userId) return false
+    if (adsLeftToday() <= 0) return false
+    if (adState.lastAt && Date.now() - new Date(adState.lastAt).getTime() < AD_COOLDOWN_MS) return false
+    return true
+  }, [userId, adState, adsLeftToday])
+
+  // Grants AD_REWARD_AMOUNT and persists the new cooldown/cap counters. Uses the same
+  // balanceRef + serial write chain as placeBet so it can't lose-update against an
+  // in-flight bet or war income collect. Returns the granted amount (0 if not allowed).
+  const claimAdReward = useCallback(async () => {
+    if (!userId || !canClaimAd()) return 0
+
+    const today    = _adToday()
+    const usedNow  = adState.date === today ? adState.count : 0
+    const newCount = usedNow + 1
+    const nowIso   = new Date().toISOString()
+    const newBalance = (balanceRef.current ?? 0) + AD_REWARD_AMOUNT
+
+    balanceRef.current = newBalance
+    setBalance(newBalance)
+    setAdState({ lastAt: nowIso, date: today, count: newCount })
+
+    const run = writeChainRef.current.then(async () => {
+      const { error } = await supabase
+        .from('wallets')
+        .update({
+          balance:           newBalance,
+          last_ad_reward:    nowIso,
+          ad_rewards_date:   today,
+          ad_rewards_count:  newCount,
+        })
+        .eq('user_id', userId)
+      if (error) console.error('[CasinoContext] claimAdReward error:', error)
+    })
+    writeChainRef.current = run.catch(() => {})
+    await run
+    return AD_REWARD_AMOUNT
+  }, [userId, adState, canClaimAd])
+
   // ── Context value ─────────────────────────────────────────────────────────
   return (
     <CasinoContext.Provider
@@ -237,6 +303,10 @@ export function CasinoProvider({ children }) {
         claimRefill,
         canClaimRefill,
         dailyBonusAmount,
+        adRewardAmount: AD_REWARD_AMOUNT,
+        claimAdReward,
+        canClaimAd,
+        adsLeftToday,
       }}
     >
       {children}
