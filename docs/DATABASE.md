@@ -11,7 +11,7 @@ policies, and the setup steps.
 > [Security limitations & known gaps](#security-limitations--known-gaps).
 
 All schema is defined in [`../supabase/migrations/`](../supabase/migrations/) as numbered SQL
-files (`001`–`028`). There is no migration runner — run them by hand in the Supabase
+files (`001`–`029`). There is no migration runner — run them by hand in the Supabase
 **SQL Editor**, in order. Migration `024` also needs the **`pg_cron`** extension enabled
 (Database → Extensions) to schedule the CP War server tick.
 
@@ -21,7 +21,7 @@ files (`001`–`028`). There is no migration runner — run them by hand in the 
 
 1. Create a Supabase project; copy the Project URL and anon key into `.env.local`
    (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`).
-2. Run migrations `001` → `028` in order in the SQL Editor. Enable the `pg_cron` extension
+2. Run migrations `001` → `029` in order in the SQL Editor. Enable the `pg_cron` extension
    (Database → Extensions) before/with `024` so the CP War `war-tick` job can be scheduled.
 3. Confirm the public storage bucket `cp-studios` exists (migration `001` creates it).
 4. Enable **Realtime** on the tables that need it (some are enabled in SQL, others must be
@@ -532,7 +532,8 @@ behaviour and would need fixing before this app could be exposed to untrusted us
 | `022_war_idle_columns.sql`             | CP War Phase 3: `war_players.vault` + `last_active_at` (idle economy/activity) |
 | `023_war_tick.sql`                     | CP War Phase 3: `war_tick()` + `war_collect_income()` + helpers (server combat/income) |
 | `024_war_cron_and_rls.sql`             | CP War Phase 3: `pg_cron` schedule for `war_tick` + server-authoritative (owner-only) RLS |
-| `025_war_events.sql`                   | CP War 2.1: `war_events` table + `war_log_event()` helper + realtime; tick updated to prune events and call the helper |
-| `026_war_combat_v2.sql`                | CP War 2.1: `war_movements.units jsonb` mixed-stack column + `war_stack_strength()` helper; tick rewritten for mixed-stack combat with ±15% RNG and 25% attacker retreat |
+| `025_war_events.sql`                   | CP War 2.1: `war_events` table + `war_log_event()` helper (EXECUTE revoked from clients — tick-only) + realtime; tick updated to prune events and call the helper |
+| `026_war_combat_v2.sql`                | CP War 2.1: `war_movements.units jsonb` mixed-stack column (+ legacy `unit_type`/`count` made nullable, `mode` check widened to include `sea`) + `war_stack_strength()` helper; tick rewritten for mixed-stack combat with ±15% RNG and 25% attacker retreat |
 | `027_war_income_territory.sql`         | CP War 2.1: per-province income — rate = `banks×50 + provinces×10` coins/hr; cap = `rate×10h` |
 | `028_war_spawn.sql`                    | CP War 2.1: `war_spawn()` SECURITY DEFINER RPC; `war_players` column lockdown (revoke INSERT/UPDATE, grant back `display_name`/`color`/`spawn_region` only) |
+| `029_war_buildings_unique.sql`         | CP War 2.1: dedupe + `UNIQUE(region_id, type)` on `war_buildings` so the tick's `sum(level)` can't double-count duplicate buildings |
