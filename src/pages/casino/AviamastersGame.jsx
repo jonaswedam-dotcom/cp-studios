@@ -520,14 +520,16 @@ export default function AviamastersGame() {
     }
 
     // Autoplay: queue next round, or stop if rounds exhausted
-    if (autoRoundsRef.current > 1) {
+    const isSuperMega = effectiveOutcome === 'land' && finalMult >= WIN_TIERS.SUPER_MEGA
+    if (!isSuperMega && autoRoundsRef.current > 1) {
       setTimeout(() => {
         setAutoRounds(prev => prev - 1)
         setAutoStartPending(true)
       }, 900)
-    } else {
+    } else if (!isSuperMega) {
       setAutoRounds(0)
     }
+    // isSuperMega: setAutoRounds(0) already called above; no further scheduling needed
   }
 
   function startFlight() {
@@ -632,7 +634,7 @@ export default function AviamastersGame() {
               balance={balance}
               speed={speed} onSpeed={setSpeed}
               safeLanding={safeLanding} onSafeLanding={setSafeLanding}
-              onAutoRounds={count => { setAutoRounds(count); startFlight() }}
+              onAutoRounds={count => { autoRoundsRef.current = count; setAutoRounds(count); startFlight() }}
             />
           )}
 
