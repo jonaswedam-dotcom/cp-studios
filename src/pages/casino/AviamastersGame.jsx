@@ -202,7 +202,7 @@ const SPEED_OPTIONS = [
 ]
 
 // ── BettingPanel ───────────────────────────────────────────────────────────────
-function BettingPanel({ bet, onBet, balance, speed, onSpeed, safeLanding, onSafeLanding }) {
+function BettingPanel({ bet, onBet, balance, speed, onSpeed, safeLanding, onSafeLanding, onAutoRounds }) {
   const safeCost  = bet * 50
   const canAfford = balance >= bet + safeCost
   return (
@@ -244,6 +244,20 @@ function BettingPanel({ bet, onBet, balance, speed, onSpeed, safeLanding, onSafe
           className={`w-4 h-4 accent-sky-400 ${canAfford ? 'cursor-pointer' : 'cursor-not-allowed'}`}
         />
       </label>
+
+      {/* Autoplay presets */}
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-semibold text-cp-muted">Autoplay</span>
+        <div className="flex gap-1.5">
+          {[5, 10, 25, 50].map(n => (
+            <button key={n} onClick={() => onAutoRounds(n)}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold border border-cp-border bg-cp-elevated
+                hover:border-amber-400/40 hover:bg-amber-400/8 text-cp-muted hover:text-amber-400 transition-all">
+              {n}×
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
@@ -398,6 +412,11 @@ export default function AviamastersGame() {
   const safeLandingRef = useRef(false)
   useEffect(() => { safeLandingRef.current = safeLanding }, [safeLanding])
 
+  const [autoRounds,       setAutoRounds]       = useState(0)   // >0 = autoplay running
+  const [autoStartPending, setAutoStartPending] = useState(false)
+  const autoRoundsRef = useRef(0)
+  useEffect(() => { autoRoundsRef.current = autoRounds }, [autoRounds])
+
   const roundRef       = useRef(null)
   const idxRef         = useRef(-1)
   const multRef        = useRef(1.0)      // running multiplier — avoids stale closure in setInterval
@@ -486,7 +505,10 @@ export default function AviamastersGame() {
       setGameResult('win')
       setWonAmount(profit)
       setPhase('landed')
-      if      (finalMult >= WIN_TIERS.SUPER_MEGA) setWinTier('SUPER_MEGA')
+      if (finalMult >= WIN_TIERS.SUPER_MEGA) {
+        setWinTier('SUPER_MEGA')
+        setAutoRounds(0)  // pause autoplay — player must manually continue after Super Mega Win
+      }
       else if (finalMult >= WIN_TIERS.MEGA)       setWinTier('MEGA')
       else if (finalMult >= WIN_TIERS.BIG)        setWinTier('BIG')
       placeBetRef.current('aviamasters', totalBet, profit)
@@ -495,6 +517,16 @@ export default function AviamastersGame() {
       setWonAmount(totalBet)
       setPhase('splashed')
       placeBetRef.current('aviamasters', totalBet, -totalBet)
+    }
+
+    // Autoplay: queue next round, or stop if rounds exhausted
+    if (autoRoundsRef.current > 1) {
+      setTimeout(() => {
+        setAutoRounds(prev => prev - 1)
+        setAutoStartPending(true)
+      }, 900)
+    } else {
+      setAutoRounds(0)
     }
   }
 
@@ -529,6 +561,8 @@ export default function AviamastersGame() {
     setUsedBoosters(INITIAL_BOOSTERS)
     setNitroActive(false)
     setWinTier(null)
+    setAutoRounds(0)
+    setAutoStartPending(false)
   }
 
   function handleBoosterActivate(kind) {
@@ -539,6 +573,13 @@ export default function AviamastersGame() {
     setUsedBoosters(prev => ({ ...prev, [kind]: true }))
     if (kind === 'nitro') setNitroActive(true)
   }
+
+  useEffect(() => {
+    if (!autoStartPending) return
+    setAutoStartPending(false)
+    startFlight()
+    // startFlight reads balanceRef/betRef/safeLandingRef — always current via refs
+  }, [autoStartPending]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (balance === null) {
     return (
@@ -591,26 +632,40 @@ export default function AviamastersGame() {
               balance={balance}
               speed={speed} onSpeed={setSpeed}
               safeLanding={safeLanding} onSafeLanding={setSafeLanding}
+              onAutoRounds={count => { setAutoRounds(count); startFlight() }}
             />
           )}
 
           {isBetting && (
-            <button
-              onClick={startFlight}
-              disabled={(balance ?? 0) < bet + (safeLanding ? bet * 50 : 0)}
-              className={`w-full py-3.5 rounded-2xl font-bold text-base tracking-wide transition-all
-                ${(balance ?? 0) < bet + (safeLanding ? bet * 50 : 0)
-                  ? 'bg-cp-elevated text-cp-muted cursor-not-allowed opacity-50'
-                  : 'bg-amber-400 hover:bg-amber-300 text-black shadow-[0_0_24px_rgba(251,191,36,0.3)] hover:shadow-[0_0_32px_rgba(251,191,36,0.45)] active:scale-95'}`}
-            >
-              Spin! 🛩️
-            </button>
+            autoRounds > 0 ? (
+              <button
+                onClick={() => setAutoRounds(0)}
+                className="w-full py-3.5 rounded-2xl font-bold text-base tracking-wide transition-all
+                  bg-red-400/20 border border-red-400/40 text-red-400 hover:bg-red-400/30 active:scale-95"
+              >
+                Stop Auto ({autoRounds} left)
+              </button>
+            ) : (
+              <button
+                onClick={startFlight}
+                disabled={(balance ?? 0) < bet + (safeLanding ? bet * 50 : 0)}
+                className={`w-full py-3.5 rounded-2xl font-bold text-base tracking-wide transition-all
+                  ${(balance ?? 0) < bet + (safeLanding ? bet * 50 : 0)
+                    ? 'bg-cp-elevated text-cp-muted cursor-not-allowed opacity-50'
+                    : 'bg-amber-400 hover:bg-amber-300 text-black shadow-[0_0_24px_rgba(251,191,36,0.3)] hover:shadow-[0_0_32px_rgba(251,191,36,0.45)] active:scale-95'}`}
+              >
+                Spin! 🛩️
+              </button>
+            )
           )}
 
           {isFlying && (
             <div className="w-full py-3.5 rounded-2xl font-bold text-center bg-cp-elevated border border-cp-border flex items-center justify-center gap-2">
               <span className="text-cp-muted">In flight…</span>
               <span className="text-amber-400">{multiplier.toFixed(2)}×</span>
+              {autoRounds > 0 && (
+                <span className="text-xs text-cp-muted font-normal">· Auto {autoRounds}</span>
+              )}
             </div>
           )}
 
