@@ -104,7 +104,7 @@ function GameBoard({ phase, planeT, badges, multiplier, flashKind, bet }) {
           const fill  = b.kind === 'mult' ? '#fbbf24' : '#86efac'
           const label = b.kind === 'mult' ? `×${b.value}` : `+${b.value}`
           return (
-            <g key={i} opacity={b.collected ? 0.2 : 1} style={{ transition: 'opacity 0.3s' }}>
+            <g key={b.idx} opacity={b.collected ? 0.2 : 1} style={{ transition: 'opacity 0.3s' }}>
               <rect x={x - 5.5} y={y - 3.2} width={11} height={6.4} rx={1.5} fill={fill} />
               <text x={x} y={y + 1.3} textAnchor="middle"
                 fontSize="3.2" fontWeight="800" fill="#000">{label}</text>
@@ -117,7 +117,7 @@ function GameBoard({ phase, planeT, badges, multiplier, flashKind, bet }) {
       {isActive && badges.filter(b => b.kind === 'rocket').map((b, i) => {
         const { x, y } = bezierPoint(b.t)
         return (
-          <div key={`r${i}`} style={{
+          <div key={b.idx} style={{
             position: 'absolute', left: `${x}%`, top: `${y}%`,
             transform: 'translate(-50%, -50%)',
             fontSize: 13, lineHeight: 1,
@@ -309,10 +309,10 @@ export default function AviamastersGame() {
   // Flight loop — reads from roundRef so it stays current after booster mutations
   useEffect(() => {
     if (phase !== 'flying') return
-    const round    = roundRef.current
     const baseTick = SPEEDS[speedRef.current] ?? SPEEDS.walking
 
     intervalRef.current = setInterval(() => {
+      const round   = roundRef.current        // ← fresh read each tick
       const nextIdx = idxRef.current + 1
 
       if (nextIdx >= round.events.length) {
@@ -407,6 +407,7 @@ export default function AviamastersGame() {
   const round  = roundRef.current
   const badges = (round?.events ?? []).map((ev, i) => ({
     ...ev,
+    idx:       i,
     t:         (i + 1) / (round.events.length || 1),
     collected: i <= eventIdx,
   }))
