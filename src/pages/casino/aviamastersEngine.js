@@ -163,8 +163,8 @@ export function assignBadgePositions(events, outcome) {
       } else if (ev.kind === 'add') {
         altitude += Math.min(ev.value * 0.18, 0.25)
       }
+      altitude = Math.max(0.08, Math.min(0.92, altitude))
     }
-    altitude = Math.max(0.08, Math.min(0.92, altitude))
     controlPts.push({ x: (i + 1) / (N + 1), altitude })
   })
 

@@ -149,3 +149,11 @@ test('assignBadgePositions: badges have evenly spaced t-values and applied: fals
   assert.ok(Math.abs(badges[2].t - 3/4) < 0.001)
   for (const b of badges) assert.equal(b.applied, false)
 })
+
+test('assignBadgePositions: empty events produces 2 control points and no badges', () => {
+  const { controlPts, badges } = assignBadgePositions([], 'land')
+  assert.equal(controlPts.length, 2)
+  assert.equal(badges.length, 0)
+  assert.equal(controlPts[0].altitude, 0.30)
+  assert.equal(controlPts[1].altitude, 0.82)
+})
