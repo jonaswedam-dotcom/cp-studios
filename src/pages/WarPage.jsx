@@ -10,6 +10,7 @@ import BuyUnitsModal from '../war/BuyUnitsModal.jsx'
 import MoveUnitsModal from '../war/MoveUnitsModal.jsx'
 import BuildingsModal from '../war/BuildingsModal.jsx'
 import { UNITS, UNIT_TYPES, START_ARMY, formatDuration } from '../war/units.js'
+import { describeEvent } from '../war/events.js'
 import { troopCost } from '../war/economy.js'
 import { emptyStack } from '../war/combat.js'
 import { costMultiplier, strengthMultiplier, buildingCost, SLOTS_PER_REGION } from '../war/buildings.js'
@@ -47,7 +48,7 @@ function WarGame() {
   const userId   = session?.user?.id
   const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || 'Player'
 
-  const { graph, regions, players, movements, buildings, loading } = useWarData(userId)
+  const { graph, regions, players, movements, buildings, events, loading } = useWarData(userId)
 
   const [selected, setSelected]   = useState(null)   // region_id (one of mine)
   const [showBuy, setShowBuy]     = useState(false)
@@ -56,6 +57,7 @@ function WarGame() {
   const [busy, setBusy]           = useState(false)
   const [flash, setFlash]         = useState('')
   const initRef = useRef(false)
+  const lastEventId = useRef(0)
 
   const me = players.find((p) => p.user_id === userId) || null
   const myRegionRows = Object.values(regions).filter((r) => r.owner_id === userId)
@@ -67,7 +69,26 @@ function WarGame() {
   const myCostMult     = costMultiplier(myBuildings)
   const myStrengthMult = strengthMultiplier(myBuildings)
 
+  const now = Date.now()
+  const myRegionIds = new Set(myRegionRows.map((r) => r.region_id))
+  const outgoing = movements.filter((m) => m.player_id === userId && m.status === 'moving')
+  const incoming = movements.filter((m) => m.status === 'moving' && m.player_id !== userId && myRegionIds.has(m.to_region))
+  const shieldMsLeft = me?.shield_until ? new Date(me.shield_until).getTime() - now : 0
+  const banksLevel = myBuildings.filter((b) => b.type === 'bank').reduce((s, b) => s + b.level, 0)
+  const incomePerHour = banksLevel * 50 + myRegionRows.length * 10
+
   const showFlash = (m) => { setFlash(m); setTimeout(() => setFlash(''), 4000) }
+
+  // ── Event toasts: fire showFlash for each newly-arrived event ───────────────
+  useEffect(() => {
+    const newest = events[0]
+    if (!newest || newest.id <= lastEventId.current) return
+    if (lastEventId.current !== 0) {
+      const { icon, text } = describeEvent(newest, graph)
+      showFlash(`${icon} ${text}`)
+    }
+    lastEventId.current = newest.id
+  }, [events, graph])
 
   // ── First join: assign a random spawn province ──────────────────────────────
   useEffect(() => {
@@ -280,7 +301,9 @@ function WarGame() {
 
       <Sidebar me={me} myRegions={myRegionRows.length} myUnits={myUnits} balance={balance}
         leaderboard={leaderboard} onBuy={() => setShowBuy(true)} eliminated={eliminated}
-        bonuses={{ costMult: myCostMult, strengthMult: myStrengthMult }} />
+        bonuses={{ costMult: myCostMult, strengthMult: myStrengthMult }}
+        events={events} graph={graph}
+        outgoing={outgoing} incoming={incoming} shieldMsLeft={shieldMsLeft} incomePerHour={incomePerHour} />
     </div>
   )
 }
