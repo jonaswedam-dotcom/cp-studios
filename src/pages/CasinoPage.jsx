@@ -4,6 +4,7 @@ import { supabase } from '../supabase'
 import { useApp } from '../context/AppContext'
 import { useCasino } from '../context/CasinoContext'
 import WatchAdModal from './casino/WatchAdModal'
+import LiveBetFeed from '../components/LiveBetFeed'
 
 // ── Game catalogue ────────────────────────────────────────────────────────────
 const GAMES = [
@@ -501,6 +502,7 @@ export default function CasinoPage() {
     <div className="min-h-screen bg-cp-bg page-in">
       <DailyBonusToast amount={dailyBonusAmount} />
       <AdRewardToast amount={adToast} />
+      <LiveBetFeed />
 
       <div className="max-w-4xl mx-auto px-4 py-10">
 

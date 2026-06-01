@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { GameLayout, BetChips } from './shared'
 import { useCasino } from '../../context/CasinoContext'
+import { CW, makeGeom, buildPath, segPos } from './plinkoGeom'
 
 // ─── Multiplier tables (Stake-accurate) ──────────────────────────────────────
 const MULT_TABLE = {
@@ -27,7 +28,6 @@ const BALL_COLORS = [
   '#60a5fa', '#f472b6', '#fb923c', '#4ade80',
 ]
 
-const CW       = 480
 const FLASH_MS = 800
 
 // ─── Slot tint: green for ≥1× (profit/push), red for <1× (loss) ──────────────
@@ -37,51 +37,8 @@ function slotTint(m) {
     : [239, 68,  68]   // red-500
 }
 
-// ─── Board geometry ───────────────────────────────────────────────────────────
-function makeGeom(rows) {
-  const TOP    = 54
-  const ROW_H  = rows <= 8 ? 40 : rows <= 12 ? 35 : 29
-  const PEG_R  = rows <= 8 ? 5.5 : rows <= 12 ? 4.5 : 3.5
-  const BALL_R = PEG_R * 1.75
-  const SLOTS  = rows + 1
-  const SLOT_W = CW / SLOTS
-  const SLOT_Y = TOP + rows * ROW_H + 14
-  const SLOT_H = 44
-  const CH     = SLOT_Y + SLOT_H + 14
-
-  const pegX   = (r, c) => CW * (c + 1) / (r + 2)
-  const pegY   = (r)    => TOP + r * ROW_H
-  const slotCX = (s)    => (s + 0.5) * SLOT_W
-
-  const pegs = []
-  for (let r = 0; r < rows; r++)
-    for (let c = 0; c <= r; c++)
-      pegs.push({ x: pegX(r, c), y: pegY(r) })
-
-  return { TOP, ROW_H, PEG_R, BALL_R, SLOTS, SLOT_W, SLOT_Y, SLOT_H, CH, pegX, pegY, slotCX, pegs }
-}
-
-// ─── Build waypoints from random decisions ────────────────────────────────────
-function buildPath(rows, decisions, geom) {
-  const { TOP, BALL_R, pegX, pegY, slotCX, SLOT_Y, SLOT_H } = geom
-  const pts = [{ x: CW / 2, y: TOP - BALL_R - 2 }]
-  let col = 0
-  for (let r = 0; r < rows; r++) {
-    pts.push({ x: pegX(r, col), y: pegY(r) })
-    if (decisions[r]) col++
-  }
-  pts.push({ x: slotCX(col), y: SLOT_Y + SLOT_H / 2 })
-  return { pts, slot: col }
-}
-
-// ─── Quadratic bezier ─────────────────────────────────────────────────────────
-function qBez(t, p0, cp, p1) {
-  const u = 1 - t
-  return {
-    x: u * u * p0.x + 2 * u * t * cp.x + t * t * p1.x,
-    y: u * u * p0.y + 2 * u * t * cp.y + t * t * p1.y,
-  }
-}
+// Board geometry, path building, and segment interpolation live in ./plinkoGeom
+// (pure + unit-tested). This file owns only the canvas rendering + React glue.
 
 // ─── Rounded rect (Safari compat) ────────────────────────────────────────────
 // Always begins a fresh path so fill and stroke calls never share stale state.
@@ -102,12 +59,12 @@ function rrect(ctx, x, y, w, h, r) {
 // ─── Draw scene ───────────────────────────────────────────────────────────────
 // balls: array of { x, y, trail, color } — x/y null when not yet/no longer visible
 // litSlots: { [slotIdx]: landingTimestamp }
-// now: current RAF timestamp (for flash fade calculation)
-function drawScene(canvas, mults, geom, balls, litSlots, now) {
+// pegHits: { "x_y": strikeTimestamp } — drives the per-peg strike "pop"
+// now: current RAF timestamp (for flash/pop fade calculation)
+function drawScene(canvas, mults, geom, balls, litSlots, pegHits, now) {
   const dpr = window.devicePixelRatio || 1
   const ctx = canvas.getContext('2d')
-  const { CH, pegs, SLOT_W, SLOT_Y, SLOT_H, PEG_R, BALL_R } = geom
-  const SLOTS = mults.length
+  const { CH, pegs, SLOT_W, SLOT_Y, SLOT_H, PEG_R, BALL_R, slotCX } = geom
 
   ctx.save()
   ctx.scale(dpr, dpr)
@@ -130,9 +87,9 @@ function drawScene(canvas, mults, geom, balls, litSlots, now) {
   // ── Slots ──
   mults.forEach((m, i) => {
     const [tR, tG, tB] = slotTint(m)
-    const x        = i * SLOT_W + 2
+    const w        = SLOT_W - 3
+    const x        = slotCX(i) - w / 2
     const y        = SLOT_Y
-    const w        = SLOT_W - 4
     const h        = SLOT_H
     const flashTs  = litSlots[i]
     const flashAge = flashTs != null ? (now - flashTs) : Infinity
@@ -192,7 +149,8 @@ function drawScene(canvas, mults, geom, balls, litSlots, now) {
     })
   })
 
-  // ── Pegs ──
+  // ── Pegs (proximity glow + strike-pop ring) ──
+  const POP_MS = 260
   pegs.forEach(({ x, y }) => {
     let minDist = Infinity
     balls.forEach(b => {
@@ -201,16 +159,32 @@ function drawScene(canvas, mults, geom, balls, litSlots, now) {
         if (d < minDist) minDist = d
       }
     })
-    const gf = minDist < 50 ? Math.max(0, 1 - minDist / 28) : 0
+    const gf    = minDist < 50 ? Math.max(0, 1 - minDist / 28) : 0
+    const hitTs = pegHits[`${Math.round(x)}_${Math.round(y)}`]
+    const pop   = hitTs != null ? Math.max(0, 1 - (now - hitTs) / POP_MS) : 0
+    const glow  = Math.max(gf, pop)
+    const r     = PEG_R * (1 + 0.55 * pop)
+
+    // expanding shock ring at the moment of a strike
+    if (pop > 0.02) {
+      ctx.save()
+      ctx.globalAlpha = pop * 0.5
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)'
+      ctx.lineWidth   = 1.5
+      ctx.beginPath()
+      ctx.arc(x, y, PEG_R + (1 - pop) * PEG_R * 3, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.restore()
+    }
 
     ctx.save()
-    ctx.shadowBlur  = gf > 0.05 ? 14 * gf : 3
-    ctx.shadowColor = gf > 0.05
-      ? `rgba(255,255,255,${0.8 * gf})`
+    ctx.shadowBlur  = glow > 0.05 ? 16 * glow : 3
+    ctx.shadowColor = glow > 0.05
+      ? `rgba(255,255,255,${0.85 * glow})`
       : 'rgba(255,255,255,0.12)'
     ctx.beginPath()
-    ctx.arc(x, y, PEG_R, 0, Math.PI * 2)
-    ctx.fillStyle = gf > 0.3 ? '#ffffff' : 'rgba(255,255,255,0.82)'
+    ctx.arc(x, y, r, 0, Math.PI * 2)
+    ctx.fillStyle = glow > 0.3 ? '#ffffff' : 'rgba(255,255,255,0.82)'
     ctx.fill()
     ctx.restore()
   })
@@ -255,6 +229,7 @@ export default function PlinkoGame() {
   const loopUntilRef = useRef(0)        // keep RAF alive until this ts for slot fade
   const ballsRef     = useRef([])        // active ball objects
   const litSlotsRef  = useRef({})        // { slotIdx: landingTimestamp }
+  const pegHitsRef   = useRef({})        // { "x_y": strikeTimestamp } for strike pops
   const ballIdRef    = useRef(0)
   const inFlightRef  = useRef(0)         // sum of bet amounts currently animating
   const balanceRef   = useRef(balance)
@@ -285,7 +260,7 @@ export default function PlinkoGame() {
     canvas.height       = Math.round(g.CH * dpr)
     canvas.style.width  = `${CW}px`
     canvas.style.height = `${g.CH}px`
-    drawScene(canvas, multsRef.current, g, [], litSlotsRef.current, performance.now())
+    drawScene(canvas, multsRef.current, g, [], litSlotsRef.current, {}, performance.now())
   }, [rows, risk])
 
   // ── RAF loop ──────────────────────────────────────────────────────────────
@@ -305,21 +280,25 @@ export default function PlinkoGame() {
         if (ball.done) return
         if (ball.segStart === null) ball.segStart = ts
 
-        const rawT = Math.min(1, (ts - ball.segStart) / ball.msPerSeg)
-        const et   = rawT * rawT   // ease-in = gravity
-
-        const { p0, cp, p1 } = ball.segs[ball.segIdx]
-        const pos = qBez(et, p0, cp, p1)
+        const rawT   = Math.min(1, (ts - ball.segStart) / ball.msPerSeg)
+        const a      = ball.pts[ball.segIdx]
+        const b      = ball.pts[ball.segIdx + 1]
+        const bounce = ball.segIdx === 0 ? 0 : ball.bounce   // entry drop has no bounce
+        const pos    = segPos(a, b, rawT, bounce)
         ball.x = pos.x
         ball.y = pos.y
 
         ball.trail.push({ x: pos.x, y: pos.y })
-        if (ball.trail.length > 5) ball.trail.shift()
+        if (ball.trail.length > 6) ball.trail.shift()
 
         if (rawT >= 1) {
           ball.segIdx++
           ball.segStart = null
-          if (ball.segIdx >= ball.segs.length) {
+          // Arriving at a peg contact (pts[1..rows]) → pop that peg.
+          if (ball.segIdx >= 1 && ball.segIdx <= ball.rows) {
+            pegHitsRef.current[`${Math.round(b.x)}_${Math.round(b.y + ball.pegOffset)}`] = ts
+          }
+          if (ball.segIdx >= ball.pts.length - 1) {
             ball.done = true
             ball.x    = null
             // Merge new flash into litSlots (spread preserves earlier unrelated flashes)
@@ -328,6 +307,10 @@ export default function PlinkoGame() {
           }
         }
       })
+
+      // prune expired strike pops
+      const hits = pegHitsRef.current
+      for (const k in hits) if (ts - hits[k] > 300) delete hits[k]
 
       // Remove landed balls and settle bets
       if (finished.length > 0) {
@@ -347,7 +330,7 @@ export default function PlinkoGame() {
         if (ballsRef.current.length === 0) setBallsActive(false)
       }
 
-      drawScene(canvas, mults, g, ballsRef.current, litSlotsRef.current, ts)
+      drawScene(canvas, mults, g, ballsRef.current, litSlotsRef.current, pegHitsRef.current, ts)
 
       if (ballsRef.current.length > 0 || ts < loopUntilRef.current) {
         rafRef.current = requestAnimationFrame(frame)
@@ -378,12 +361,7 @@ export default function PlinkoGame() {
     const mult          = mults[slot]
     const payout        = Math.floor(b * mult)
     const winAmount     = payout - b
-    const msPerSeg      = r <= 8 ? 260 : r <= 12 ? 230 : 200
-
-    const segs = pts.slice(0, -1).map((p0, i) => {
-      const p1 = pts[i + 1]
-      return { p0, p1, cp: { x: p1.x, y: p0.y } }
-    })
+    const msPerSeg      = r <= 8 ? 240 : r <= 12 ? 215 : 190
 
     const id    = ballIdRef.current++
     const color = BALL_COLORS[id % BALL_COLORS.length]
@@ -391,7 +369,8 @@ export default function PlinkoGame() {
     inFlightRef.current += b
 
     ballsRef.current.push({
-      id, segs, slot, mult, winAmount, bet: b, color, msPerSeg,
+      id, pts, slot, mult, winAmount, bet: b, color, msPerSeg,
+      rows: r, bounce: g.ROW_H * 0.6, pegOffset: g.PEG_R + g.BALL_R + g.S * 0.04,
       segIdx: 0, segStart: null,
       x: null, y: null,
       trail: [], done: false,

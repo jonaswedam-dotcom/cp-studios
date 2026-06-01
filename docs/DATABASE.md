@@ -11,7 +11,7 @@ policies, and the setup steps.
 > [Security limitations & known gaps](#security-limitations--known-gaps).
 
 All schema is defined in [`../supabase/migrations/`](../supabase/migrations/) as numbered SQL
-files (`001`–`031`). There is no migration runner — run them by hand in the Supabase
+files (`001`–`033`). There is no migration runner — run them by hand in the Supabase
 **SQL Editor**, in order. Migration `024` also needs the **`pg_cron`** extension enabled
 (Database → Extensions) to schedule the CP War server tick.
 
@@ -21,7 +21,7 @@ files (`001`–`031`). There is no migration runner — run them by hand in the 
 
 1. Create a Supabase project; copy the Project URL and anon key into `.env.local`
    (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`).
-2. Run migrations `001` → `031` in order in the SQL Editor. Enable the `pg_cron` extension
+2. Run migrations `001` → `033` in order in the SQL Editor. Enable the `pg_cron` extension
    (Database → Extensions) before/with `024` so the CP War `war-tick` job can be scheduled.
 3. Confirm the public storage bucket `cp-studios` exists (migration `001` creates it).
 4. Enable **Realtime** on the tables that need it (some are enabled in SQL, others must be
@@ -31,6 +31,7 @@ files (`001`–`031`). There is no migration runner — run them by hand in the 
    - `war_regions`, `war_players`, `war_movements` — required for CP War (commented hint in `019`).
    - `war_buildings` — required for CP War buildings (commented hint in `021`).
    - `war_events` — added to the `supabase_realtime` publication in migration `025`; confirm it is enabled in **Database → Replication** so clients receive live event toasts.
+   - `game_history` — added to the `supabase_realtime` publication in migration `033`; confirm it is enabled in **Database → Replication** so the casino live bet feed receives every player's bets.
 5. Make sure an account exists with the **admin email** (see [Admin model](#admin-model)).
 
 ---
@@ -152,7 +153,10 @@ is no real ad network (not appropriate for a private app).
 
 #### `game_history`
 Append-only log of bets: `game`, `bet`, `result` (`win`|`loss`|`push`), `payout`. A user can
-read/insert only their own rows.
+insert only their own rows. **As of migration `033` any authenticated member can SELECT all
+rows** (was self-only in `005`) — this powers the casino live bet feed (`LiveBetFeed.jsx`),
+which subscribes to INSERTs over Realtime and pops a bubble per bet. There is still no
+UPDATE/DELETE policy, so the log stays append-only; only read visibility widened.
 
 #### `donations`
 Audit log of coin transfers (`sender_id`, `recipient_id`, `amount`). Participants can read
@@ -549,3 +553,5 @@ behaviour and would need fixing before this app could be exposed to untrusted us
 | `029_war_buildings_unique.sql`         | CP War 2.1: dedupe + `UNIQUE(region_id, type)` on `war_buildings` so the tick's `sum(level)` can't double-count duplicate buildings |
 | `030_reset_money.sql`                  | One-off: reset all in-game money (coins-only) — `wallets.balance`→1000, re-arm daily bonus, `war_players.vault`→0, income/activity clocks→`now()`. War map preserved. |
 | `031_ad_rewards.sql`                   | Rewarded-ad faucet: add `wallets.last_ad_reward` / `ad_rewards_date` / `ad_rewards_count` (cooldown + daily cap for "watch an ad for coins") |
+| `032_delta_wallet_rpcs.sql`            | Delta-based wallet RPCs (`settle_bet`, `apply_balance_delta`, `claim_daily_bonus`, `settle_ad_reward`) — apply balance changes relative to the live DB value instead of an absolute client snapshot, fixing the "sent coins disappear" race. Required by the updated `CasinoContext.jsx`. |
+| `033_game_history_feed.sql`            | Live bet feed: replace `game_history` self-only SELECT with select-all (`auth.role()='authenticated'`) + add the table to the `supabase_realtime` publication |

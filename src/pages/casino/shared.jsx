@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useCasino } from '../../context/CasinoContext'
+import LiveBetFeed from '../../components/LiveBetFeed'
 
 // ── Helper ────────────────────────────────────────────────────────────────────
 export function formatCoins(n) {
@@ -37,6 +38,7 @@ export function GameLayout({ title, children, wide }) {
   return (
     <div className="min-h-screen bg-cp-bg">
       <DailyBonusToast amount={dailyBonusAmount} />
+      <LiveBetFeed />
 
       <div className={`${wide ? 'max-w-5xl' : 'max-w-2xl'} mx-auto px-4 py-8`}>
         {/* Header */}

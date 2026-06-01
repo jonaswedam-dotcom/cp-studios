@@ -170,6 +170,7 @@ enforced behaviour.
 | `dm-user-<uid>`     | `ChatBubble.jsx` | Per-user stream of incoming DMs (RLS-scoped)        |
 | `dm-typing-<tid>`   | `ChatBubble.jsx` | Per-thread DM typing-indicator broadcasts          |
 | `navbar-pending`    | `Navbar.jsx`     | Admin's "new signup request" notification dot       |
+| `casino-bet-feed`   | `LiveBetFeed.jsx`| All players' bets (`game_history` INSERTs) → fading top-of-screen bubbles |
 | `war-rt-v2`         | `useWarData.js`  | regions / players / movements / buildings sync for CP War |
 
 ## Where to make common changes
