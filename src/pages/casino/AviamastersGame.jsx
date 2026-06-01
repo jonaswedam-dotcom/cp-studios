@@ -262,6 +262,8 @@ const BOOSTER_DEFS = [
   { key: 'life_buoy', icon: '🛟',  label: 'Life Buoy' },
 ]
 
+const INITIAL_BOOSTERS = { laser_gun: false, magnet: false, nitro: false, life_buoy: false }
+
 function BoosterBar({ usedBoosters, onActivate, isFlying }) {
   return (
     <div className="w-full max-w-md flex gap-2">
@@ -302,12 +304,8 @@ export default function AviamastersGame() {
   const [gameResult, setGameResult] = useState(null)
   const [wonAmount,  setWonAmount]  = useState(0)
 
-  const INITIAL_BOOSTERS = { laser_gun: false, magnet: false, nitro: false, life_buoy: false }
-
   const [usedBoosters, setUsedBoosters] = useState(INITIAL_BOOSTERS)
   const [nitroActive,  setNitroActive]  = useState(false)
-  const nitroActiveRef = useRef(false)
-  useEffect(() => { nitroActiveRef.current = nitroActive }, [nitroActive])
 
   const roundRef       = useRef(null)
   const idxRef         = useRef(-1)
