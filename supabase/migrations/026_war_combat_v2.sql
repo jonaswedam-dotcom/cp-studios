@@ -8,6 +8,14 @@
 -- stack fights as one force (incl. warship-ferried land units) on arrival.
 
 alter table public.war_movements add column if not exists units jsonb not null default '{}'::jsonb;
+-- v2 movements carry the `units` jsonb instead of a single unit_type/count, can use the
+-- new 'sea' mode, and are no longer bounded by the old count>0 check. Make the legacy
+-- columns optional and widen the mode check so v2 inserts don't violate the 019/024 schema.
+alter table public.war_movements alter column unit_type drop not null;
+alter table public.war_movements alter column count drop not null;
+alter table public.war_movements drop constraint if exists war_movements_count_check;
+alter table public.war_movements drop constraint if exists war_movements_mode_check;
+alter table public.war_movements add constraint war_movements_mode_check check (mode in ('land','air','sea'));
 
 -- Strength of a jsonb stack. Mirrors war_unit_strength() / src/war/combat.js stackStrength.
 create or replace function public.war_stack_strength(s jsonb) returns numeric
@@ -154,12 +162,16 @@ begin
           perform public.war_log_event(dest.owner_id, 'lost', mv.to_region,
             jsonb_build_object('opponent', aname));
         else
-          -- defender holds: scale survivors down, then attacker retreats 25% home
-          ratio := (d_eff - a_eff) / d_eff;
-          update public.war_regions
-            set soldier = floor(soldier * ratio), tank = floor(tank * ratio),
-                jet = floor(jet * ratio), warship = floor(warship * ratio), updated_at = now()
-          where region_id = mv.to_region;
+          -- defender holds: scale survivors down, then attacker retreats 25% home.
+          -- Guard d_eff>0: a zeroed attacker (a_eff=0) vs an empty garrison (d_eff=0)
+          -- lands here, and (d_eff-a_eff)/d_eff would divide by zero and abort the whole tick.
+          if d_eff > 0 then
+            ratio := (d_eff - a_eff) / d_eff;
+            update public.war_regions
+              set soldier = floor(soldier * ratio), tank = floor(tank * ratio),
+                  jet = floor(jet * ratio), warship = floor(warship * ratio), updated_at = now()
+            where region_id = mv.to_region;
+          end if;
           update public.war_regions set soldier = 1
             where region_id = mv.to_region and (soldier + tank + jet + warship) = 0;
           -- attacker retreat (only if the origin is still owned by the sender)

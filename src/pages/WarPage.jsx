@@ -54,6 +54,7 @@ function WarGame() {
   const [selected, setSelected]   = useState(null)   // region_id (one of mine)
   const [showBuy, setShowBuy]     = useState(false)
   const [moveFrom, setMoveFrom]   = useState(null)    // region_id for the move modal
+  const [moveDest, setMoveDest]   = useState(null)    // region_id the player clicked as the target
   const [buildFor, setBuildFor]   = useState(null)    // region_id for the buildings modal
   const [busy, setBusy]           = useState(false)
   const [flash, setFlash]         = useState('')
@@ -145,7 +146,7 @@ function WarGame() {
       await adjustBalance(-cost)
       showFlash(`+${count} ${UNITS[type].label}${count > 1 ? 's' : ''}`)
     } finally { setShowBuy(false); setBusy(false) }
-  }, [busy, me, balance, myRegionRows, regions, graph, userId, adjustBalance, myCostMult])
+  }, [busy, me, balance, myRegionRows, regions, graph, userId, adjustBalance, myCostMult, myArmyMult])
 
   // ── Send a movement ─────────────────────────────────────────────────────────
   const handleMove = useCallback(async ({ dest, stack, mode }) => {
@@ -173,7 +174,7 @@ function WarGame() {
         showFlash('Move failed.'); return
       }
       showFlash(`Force en route — arrives in ${formatDuration(v.arrivesInSeconds)}`)
-    } finally { setMoveFrom(null); setSelected(null); setBusy(false) }
+    } finally { setMoveFrom(null); setMoveDest(null); setSelected(null); setBusy(false) }
   }, [busy, moveFrom, regions, userId, players, graph])
 
   // ── Build / upgrade buildings on an owned province ──────────────────────────
@@ -242,7 +243,7 @@ function WarGame() {
     const targetShielded = row?.owner_id && row.owner_id !== userId &&
       players.some((p) => p.user_id === row.owner_id && p.shield_until && new Date(p.shield_until) > new Date())
     if (canReach && targetShielded) { showFlash("That player is shielded — you can't attack yet."); return }
-    if (canReach) { setMoveFrom(selected); return }
+    if (canReach) { setMoveFrom(selected); setMoveDest(regionId); return }
     if (row?.owner_id === userId) setSelected(regionId)
     else setSelected(null)
   }, [selected, regions, userId, graph, players])
@@ -277,7 +278,7 @@ function WarGame() {
   return (
     <div className="flex flex-col lg:flex-row h-[calc(100vh-64px)] overflow-hidden bg-[#0a0a0a]">
       {showBuy && <BuyUnitsModal balance={balance} costMult={myCostMult} armyMult={myArmyMult} loading={busy} onConfirm={handleBuy} onClose={() => setShowBuy(false)} />}
-      {moveFrom && <MoveUnitsModal graph={graph} regions={regions} fromRegion={moveFrom} loading={busy} onConfirm={handleMove} onClose={() => { setMoveFrom(null); setSelected(null) }} />}
+      {moveFrom && <MoveUnitsModal graph={graph} regions={regions} fromRegion={moveFrom} initialDest={moveDest} loading={busy} onConfirm={handleMove} onClose={() => { setMoveFrom(null); setMoveDest(null); setSelected(null) }} />}
       {buildFor && (
         <BuildingsModal regionName={graph.regions[buildFor]?.city || buildFor}
           regionBuildings={buildingsIn(buildFor)} balance={balance} loading={busy}

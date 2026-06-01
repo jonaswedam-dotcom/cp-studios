@@ -4,7 +4,7 @@ import { landNeighbors, airReachable, seaReachable } from './geo.js'
 import { validateMove, WARSHIP_CAPACITY } from './movement.js'
 import { UnitIcon } from './icons.jsx'
 
-export default function MoveUnitsModal({ graph, regions, fromRegion, onConfirm, onClose, loading }) {
+export default function MoveUnitsModal({ graph, regions, fromRegion, initialDest, onConfirm, onClose, loading }) {
   const fromRow = regions[fromRegion]
   const available = (t) => fromRow?.[t] || 0
 
@@ -23,7 +23,10 @@ export default function MoveUnitsModal({ graph, regions, fromRegion, onConfirm, 
     }))
   }, [graph, fromRegion, regions, fromRow])
 
-  const [dest, setDest] = useState('')
+  // Seed from the province the player clicked on the map (if it's reachable).
+  const [dest, setDest] = useState(
+    initialDest && allDestinations.some((d) => d.id === initialDest) ? initialDest : ''
+  )
 
   // Determine valid modes for the chosen destination.
   const validModes = useMemo(() => {
@@ -75,7 +78,8 @@ export default function MoveUnitsModal({ graph, regions, fromRegion, onConfirm, 
   }, [fromRegion, dest, effectiveMode, stack, graph])
 
   const stackIsEmpty = Object.keys(stack).length === 0
-  const canConfirm = !stackIsEmpty && !validation.error && !loading
+  const enoughUnits = Object.entries(stack).every(([t, n]) => n <= available(t))
+  const canConfirm = !stackIsEmpty && enoughUnits && !validation.error && !loading
 
   const destRow = regions[dest]
   const isAttack = destRow?.owner_id && destRow.owner_id !== fromRow?.owner_id
@@ -169,6 +173,9 @@ export default function MoveUnitsModal({ graph, regions, fromRegion, onConfirm, 
             {/* Error text */}
             {validation.error && !stackIsEmpty && (
               <p className="text-xs text-red-400">{validation.error}</p>
+            )}
+            {!enoughUnits && !stackIsEmpty && (
+              <p className="text-xs text-red-400">Not enough units available.</p>
             )}
           </div>
         )}

@@ -21,6 +21,10 @@ returns void language sql security definer set search_path = public as $$
   insert into public.war_events(player_id, kind, region_id, detail)
   values (p_player, p_kind, p_region, coalesce(p_detail, '{}'::jsonb));
 $$;
+-- Lock down: only war_tick() (runs as owner) calls this. Without this revoke any
+-- authenticated client could call it directly and forge events into ANY player's feed.
+revoke all on function public.war_log_event(uuid, text, text, jsonb) from public;
+revoke all on function public.war_log_event(uuid, text, text, jsonb) from anon, authenticated;
 
 -- Realtime so clients get live toasts (client subscribes filtered by player_id).
 do $$ begin

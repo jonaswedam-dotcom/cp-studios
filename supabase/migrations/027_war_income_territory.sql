@@ -140,12 +140,16 @@ begin
           perform public.war_log_event(dest.owner_id, 'lost', mv.to_region,
             jsonb_build_object('opponent', aname));
         else
-          -- defender holds: scale survivors down, then attacker retreats 25% home
-          ratio := (d_eff - a_eff) / d_eff;
-          update public.war_regions
-            set soldier = floor(soldier * ratio), tank = floor(tank * ratio),
-                jet = floor(jet * ratio), warship = floor(warship * ratio), updated_at = now()
-          where region_id = mv.to_region;
+          -- defender holds: scale survivors down, then attacker retreats 25% home.
+          -- Guard d_eff>0: a zeroed attacker (a_eff=0) vs an empty garrison (d_eff=0)
+          -- lands here, and (d_eff-a_eff)/d_eff would divide by zero and abort the whole tick.
+          if d_eff > 0 then
+            ratio := (d_eff - a_eff) / d_eff;
+            update public.war_regions
+              set soldier = floor(soldier * ratio), tank = floor(tank * ratio),
+                  jet = floor(jet * ratio), warship = floor(warship * ratio), updated_at = now()
+            where region_id = mv.to_region;
+          end if;
           update public.war_regions set soldier = 1
             where region_id = mv.to_region and (soldier + tank + jet + warship) = 0;
           -- attacker retreat (only if the origin is still owned by the sender)

@@ -45,13 +45,13 @@ export default function Sidebar({ me, myRegions, myUnits, balance, leaderboard, 
             {outgoing && outgoing.length > 0 && (
               <div><p className="text-cp-muted mt-1 mb-1">Outgoing</p>
                 {outgoing.map((m) => (
-                  <p key={m.id} className="text-cp-text">→ {graph.regions[m.to_region]?.city || m.to_region} · {formatDuration(Math.max(0, Math.round((new Date(m.arrives_at).getTime() - Date.now()) / 1000)))}</p>
+                  <p key={m.id} className="text-cp-text">→ {graph?.regions?.[m.to_region]?.city || m.to_region} · {formatDuration(Math.max(0, Math.round((new Date(m.arrives_at).getTime() - Date.now()) / 1000)))}</p>
                 ))}</div>
             )}
             {incoming && incoming.length > 0 && (
               <div><p className="text-red-400 mt-1 mb-1">⚠ Incoming</p>
                 {incoming.map((m) => (
-                  <p key={m.id} className="text-red-300">{graph.regions[m.to_region]?.city || m.to_region} · {formatDuration(Math.max(0, Math.round((new Date(m.arrives_at).getTime() - Date.now()) / 1000)))}</p>
+                  <p key={m.id} className="text-red-300">{graph?.regions?.[m.to_region]?.city || m.to_region} · {formatDuration(Math.max(0, Math.round((new Date(m.arrives_at).getTime() - Date.now()) / 1000)))}</p>
                 ))}</div>
             )}
           </div>
