@@ -314,6 +314,69 @@ function BoosterBar({ usedBoosters, onActivate, isFlying }) {
   )
 }
 
+// ── Win tier metadata ─────────────────────────────────────────────────────────
+const WIN_TIER_META = {
+  BIG:        { label: 'BIG WIN',        color: '#fbbf24', glow: 'rgba(251,191,36,0.55)',  bg: 'rgba(251,191,36,0.10)' },
+  MEGA:       { label: 'MEGA WIN',       color: '#f97316', glow: 'rgba(249,115,22,0.55)',  bg: 'rgba(249,115,22,0.10)' },
+  SUPER_MEGA: { label: 'SUPER MEGA WIN', color: '#ef4444', glow: 'rgba(239,68,68,0.55)',   bg: 'rgba(239,68,68,0.10)'  },
+}
+
+function WinPopup({ tier, multiplier, onDismiss }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 2500)
+    return () => clearTimeout(t)
+  }, [onDismiss])
+
+  const meta = WIN_TIER_META[tier]
+  if (!meta) return null
+
+  return (
+    <div
+      onClick={onDismiss}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 60,
+        background: 'rgba(0,0,0,0.82)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        animation: 'amWinIn 0.35s cubic-bezier(0.34,1.56,0.64,1) forwards',
+        cursor: 'pointer',
+      }}
+    >
+      <div style={{
+        textAlign: 'center', padding: '48px 56px',
+        borderRadius: 24, border: `2px solid ${meta.color}40`,
+        background: meta.bg,
+        boxShadow: `0 0 80px ${meta.glow}`,
+        animation: tier === 'SUPER_MEGA' ? 'amShimmer 1.2s ease-in-out infinite' : 'none',
+      }}>
+        <div style={{ fontSize: 52, marginBottom: 12 }}>🏆</div>
+        <div style={{
+          fontSize: 34, fontWeight: 900, color: meta.color,
+          letterSpacing: 3, textTransform: 'uppercase',
+        }}>
+          {meta.label}
+        </div>
+        <div style={{
+          fontSize: 52, fontWeight: 900, color: '#fff',
+          marginTop: 10, letterSpacing: -1,
+        }}>
+          {multiplier.toFixed(2)}×
+        </div>
+        <p style={{ marginTop: 18, fontSize: 11, color: '#6b7280' }}>tap to dismiss</p>
+      </div>
+      <style>{`
+        @keyframes amWinIn {
+          from { opacity:0; transform:scale(0.72); }
+          to   { opacity:1; transform:scale(1);    }
+        }
+        @keyframes amShimmer {
+          0%,100% { box-shadow: 0 0 80px ${meta.glow}; }
+          50%     { box-shadow: 0 0 130px ${meta.glow}, 0 0 180px ${meta.glow}; }
+        }
+      `}</style>
+    </div>
+  )
+}
+
 // ── AviamastersGame ────────────────────────────────────────────────────────────
 export default function AviamastersGame() {
   const { balance, placeBet } = useCasino()
@@ -329,6 +392,7 @@ export default function AviamastersGame() {
 
   const [usedBoosters, setUsedBoosters] = useState(INITIAL_BOOSTERS)
   const [nitroActive,  setNitroActive]  = useState(false)
+  const [winTier,      setWinTier]      = useState(null)
 
   const [safeLanding, setSafeLanding] = useState(false)
   const safeLandingRef = useRef(false)
@@ -422,6 +486,9 @@ export default function AviamastersGame() {
       setGameResult('win')
       setWonAmount(profit)
       setPhase('landed')
+      if      (finalMult >= WIN_TIERS.SUPER_MEGA) setWinTier('SUPER_MEGA')
+      else if (finalMult >= WIN_TIERS.MEGA)       setWinTier('MEGA')
+      else if (finalMult >= WIN_TIERS.BIG)        setWinTier('BIG')
       placeBetRef.current('aviamasters', totalBet, profit)
     } else {
       setGameResult('loss')
@@ -461,6 +528,7 @@ export default function AviamastersGame() {
     setWonAmount(0)
     setUsedBoosters(INITIAL_BOOSTERS)
     setNitroActive(false)
+    setWinTier(null)
   }
 
   function handleBoosterActivate(kind) {
@@ -569,6 +637,14 @@ export default function AviamastersGame() {
           </div>
         )}
       </div>
+
+      {winTier && (
+        <WinPopup
+          tier={winTier}
+          multiplier={multiplier}
+          onDismiss={() => setWinTier(null)}
+        />
+      )}
     </GameLayout>
   )
 }
