@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path'
 import { UNITS } from './units.js'
 import { COIN_PER_STRENGTH } from './spoils.js'
 import { INCOME_PER_BANK_LEVEL_PER_HOUR } from './buildings.js'
+import { RETREAT_FRACTION, RNG_MIN, RNG_SPAN } from './combat.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const mig = (f) => readFileSync(join(here, '..', '..', 'supabase', 'migrations', f), 'utf8')
@@ -28,4 +29,21 @@ test('bank income 50/level/hour matches buildings.js + 023', () => {
 test('loot uses COIN_PER_STRENGTH (5) and 0.8 in 023', () => {
   assert.equal(COIN_PER_STRENGTH, 5)
   assert.match(mig('023_war_tick.sql'), /0\.8 \* def_raw \* 5/)
+})
+
+test('combat RNG band + retreat fraction match 026 tick', () => {
+  assert.equal(RNG_MIN, 0.85)
+  assert.equal(RNG_SPAN, 0.30)
+  assert.equal(RETREAT_FRACTION, 0.25)
+  const sql = mig('026_war_combat_v2.sql')
+  assert.match(sql, /0\.85 \+ random\(\) \* 0\.30/)
+  assert.match(sql, /\* 0\.25/) // attacker retreat keeps 25%
+})
+
+test('unit strengths match war_stack_strength() in 026', () => {
+  const sql = mig('026_war_combat_v2.sql')
+  assert.match(sql, /'soldier'\)::numeric,0\)\*1/)
+  assert.match(sql, /'tank'\)::numeric,0\)\*5/)
+  assert.match(sql, /'jet'\)::numeric,0\)\*3/)
+  assert.match(sql, /'warship'\)::numeric,0\)\*2/)
 })
