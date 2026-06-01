@@ -6,7 +6,7 @@
 export const UNITS = {
   soldier: { label: 'Soldier', strength: 1, cost: 100, mode: 'land', travelSeconds: 1200 },   // 20m
   tank:    { label: 'Tank',    strength: 5, cost: 500, mode: 'land', travelSeconds: 2400 },   // 40m
-  jet:     { label: 'Jet',     strength: 3, cost: 800, mode: 'air',  travelSeconds: 600, airRangeKm: 4500 }, // 10m
+  jet:     { label: 'Jet',     strength: 3, cost: 800, mode: 'air',  travelSeconds: 600, airRangeKm: 7000 }, // 10m
   warship: { label: 'Warship', strength: 2, cost: 600, mode: 'sea',  travelSeconds: 2400, seaRangeKm: 7000 }, // 40m
 }
 
