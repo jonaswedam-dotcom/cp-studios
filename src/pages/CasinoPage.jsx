@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { useApp } from '../context/AppContext'
 import { useCasino } from '../context/CasinoContext'
+import WatchAdModal from './casino/WatchAdModal'
 
 // ── Game catalogue ────────────────────────────────────────────────────────────
 const GAMES = [
@@ -10,7 +11,7 @@ const GAMES = [
     route:       '/casino/coin-flip',
     emoji:       '🪙',
     name:        'Coin Flip',
-    description: '50/50 shot — double or nothing',
+    description: '50/50 shot — win 1.95×',
   },
   {
     route:       '/casino/dice',
@@ -432,13 +433,36 @@ function DailyBonusToast({ amount }) {
   )
 }
 
+// ── Ad reward toast ─────────────────────────────────────────────────────────────
+function AdRewardToast({ amount }) {
+  if (!amount) return null
+  return (
+    <div
+      className="fixed top-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5
+        bg-amber-400 text-black font-bold text-sm px-5 py-3 rounded-2xl
+        shadow-[0_4px_24px_rgba(251,191,36,0.45)]"
+      style={{ animation: 'bonusSlideIn 0.35s cubic-bezier(0.34,1.56,0.64,1) forwards' }}
+    >
+      <span className="text-lg">🎬</span>
+      Ad reward: +{amount.toLocaleString()} coins!
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function CasinoPage() {
-  const { balance, claimRefill, canClaimRefill, dailyBonusAmount } = useCasino()
+  const {
+    balance, claimRefill, canClaimRefill, dailyBonusAmount,
+    claimAdReward, canClaimAd, adsLeftToday, adRewardAmount,
+  } = useCasino()
 
   const [refillClaimed,  setRefillClaimed]  = useState(false)
   const [sendCoinsOpen,  setSendCoinsOpen]  = useState(false)
   const [donateSuccessMsg, setDonateSuccessMsg] = useState('')
+  const [adOpen,    setAdOpen]    = useState(false)
+  const [adToast,   setAdToast]   = useState(0)
+  const adToastRef = useRef(null)
+  useEffect(() => () => clearTimeout(adToastRef.current), [])
 
   // Ref so LeaderboardSection can expose its refresh function
   const lbRefreshRef = useRef(null)
@@ -460,12 +484,23 @@ export default function CasinoPage() {
     if (lbRefreshRef.current) lbRefreshRef.current()
   }
 
+  async function handleAdClaim() {
+    const got = await claimAdReward()
+    if (got) {
+      clearTimeout(adToastRef.current)
+      setAdToast(got)
+      adToastRef.current = setTimeout(() => setAdToast(0), 4000)
+      if (lbRefreshRef.current) lbRefreshRef.current()
+    }
+  }
+
   const showRefillButton = balance === 0 && canClaimRefill()
   const showOutOfRefills  = balance === 0 && !canClaimRefill()
 
   return (
     <div className="min-h-screen bg-cp-bg page-in">
       <DailyBonusToast amount={dailyBonusAmount} />
+      <AdRewardToast amount={adToast} />
 
       <div className="max-w-4xl mx-auto px-4 py-10">
 
@@ -478,17 +513,37 @@ export default function CasinoPage() {
             </p>
           </div>
 
-          {/* Send Coins button */}
-          <button
-            onClick={() => setSendCoinsOpen(true)}
-            className="flex-shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl
-              border border-amber-400/30 bg-amber-400/5 text-amber-400
-              hover:bg-amber-400/15 hover:border-amber-400/60
-              font-semibold text-sm transition-all active:scale-95"
-          >
-            <span>💸</span>
-            Send Coins
-          </button>
+          {/* Action buttons */}
+          <div className="flex-shrink-0 flex items-center gap-2">
+            {/* Watch ad for coins */}
+            <button
+              onClick={() => setAdOpen(true)}
+              disabled={!canClaimAd()}
+              title={canClaimAd()
+                ? `Watch an ad for +${adRewardAmount} coins (${adsLeftToday()} left today)`
+                : 'No ads available right now — check back soon'}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all
+                ${canClaimAd()
+                  ? 'border border-amber-400/30 bg-amber-400/5 text-amber-400 hover:bg-amber-400/15 hover:border-amber-400/60 active:scale-95'
+                  : 'border border-cp-border bg-cp-elevated text-cp-muted cursor-not-allowed opacity-60'
+                }`}
+            >
+              <span>🎬</span>
+              Watch ad
+            </button>
+
+            {/* Send Coins button */}
+            <button
+              onClick={() => setSendCoinsOpen(true)}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl
+                border border-amber-400/30 bg-amber-400/5 text-amber-400
+                hover:bg-amber-400/15 hover:border-amber-400/60
+                font-semibold text-sm transition-all active:scale-95"
+            >
+              <span>💸</span>
+              Send Coins
+            </button>
+          </div>
         </div>
 
         {/* Donate success banner */}
@@ -570,6 +625,16 @@ export default function CasinoPage() {
           senderBalance={balance ?? 0}
           onClose={() => setSendCoinsOpen(false)}
           onDonate={handleModalDonate}
+        />
+      )}
+
+      {/* ── Watch Ad Modal ── */}
+      {adOpen && (
+        <WatchAdModal
+          onClose={() => setAdOpen(false)}
+          onClaim={handleAdClaim}
+          rewardAmount={adRewardAmount}
+          adsLeft={adsLeftToday()}
         />
       )}
     </div>
