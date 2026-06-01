@@ -55,9 +55,12 @@ export default function FlightBoard({ phase, multiplier, crashPoint, cashedOutAt
         animation: crashed && !REDUCED_MOTION ? 'fbShake 0.4s ease' : 'none',
       }}
     >
+      {/* Container enforces the matching aspect-ratio, so "meet" renders identically
+          to "none" here but degrades gracefully (letterbox, not distort) if an
+          ancestor ever constrains height independently. */}
       <svg
         viewBox={`0 0 ${DIMS.w} ${DIMS.h}`}
-        preserveAspectRatio="none"
+        preserveAspectRatio="xMidYMid meet"
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
       >
         <defs>
