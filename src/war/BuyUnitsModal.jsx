@@ -3,12 +3,12 @@ import { UNITS, UNIT_TYPES } from './units.js'
 import { troopCost, maxAffordable } from './economy.js'
 import { UnitIcon } from './icons.jsx'
 
-export default function BuyUnitsModal({ balance, costMult = 1, onConfirm, onClose, loading }) {
+export default function BuyUnitsModal({ balance, costMult = 1, armyMult = 1, onConfirm, onClose, loading }) {
   const [type, setType]   = useState('soldier')
   const [count, setCount] = useState('')
-  const max   = maxAffordable(type, balance, costMult)
+  const max   = maxAffordable(type, balance, costMult, armyMult)
   const n     = parseInt(count) || 0
-  const cost  = troopCost(type, n, costMult)
+  const cost  = troopCost(type, n, costMult, armyMult)
   const valid = n >= 1 && n <= max
 
   return (
@@ -40,6 +40,7 @@ export default function BuyUnitsModal({ balance, costMult = 1, onConfirm, onClos
             className="w-full bg-cp-elevated border border-cp-border rounded-xl px-4 py-3 text-cp-text text-sm focus:border-red-500/50 focus:outline-none"
             placeholder={`1 – ${max}`} />
           {valid && <p className="text-xs text-amber-400/80 mt-1.5">Cost: {cost.toLocaleString()} coins</p>}
+          {armyMult > 1 && <p className="text-xs text-cp-muted mt-1">Army-size surcharge ×{armyMult}</p>}
           {count && !valid && n > 0 && <p className="text-xs text-red-400 mt-1.5">Not enough coins.</p>}
         </div>
 

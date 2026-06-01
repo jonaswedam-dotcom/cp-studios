@@ -1,5 +1,6 @@
 export const SLOTS_PER_REGION = 3
 export const INCOME_PER_BANK_LEVEL_PER_HOUR = 50 // tunable
+export const INCOME_PER_PROVINCE_PER_HOUR = 10
 
 export const BUILDINGS = {
   bunker:  { label: 'Bunker',      kind: 'defense', cost: [800, 1600, 3200],  desc: 'Defenders here fight much harder.' },
@@ -37,7 +38,8 @@ export function costMultiplier(playerBuildings) {
 export function strengthMultiplier(playerBuildings) {
   return 1 + 0.1 * totalLevel(playerBuildings, 'lab')
 }
-export function incomePerTick(playerBuildings, tickSeconds) {
+export function incomePerTick(playerBuildings, tickSeconds, provinceCount = 0) {
   const lv = totalLevel(playerBuildings, 'bank')
-  return Math.round(lv * INCOME_PER_BANK_LEVEL_PER_HOUR * (tickSeconds / 3600))
+  const rate = lv * INCOME_PER_BANK_LEVEL_PER_HOUR + provinceCount * INCOME_PER_PROVINCE_PER_HOUR
+  return Math.round(rate * (tickSeconds / 3600))
 }

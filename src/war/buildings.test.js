@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   buildingCost, SLOTS_PER_REGION, BUILDING_TYPES,
   defenseMultiplier, antiAirFactor, costMultiplier, strengthMultiplier, incomePerTick,
+  INCOME_PER_PROVINCE_PER_HOUR,
 } from './buildings.js'
 
 test('there are five building types and three slots', () => {
@@ -35,4 +36,10 @@ test('global economy multipliers sum building levels', () => {
 test('incomePerTick scales with bank levels and tick length', () => {
   // 2 bank levels, 3600s tick, 50 coins/level/hour -> 100
   assert.equal(incomePerTick([{ type: 'bank', level: 2 }], 3600), 100)
+})
+
+test('income includes per-province trickle', () => {
+  assert.equal(INCOME_PER_PROVINCE_PER_HOUR, 10)
+  // 2 banks (×50) + 3 provinces (×10) = 130/hr; one hour tick → 130
+  assert.equal(incomePerTick([{ type: 'bank', level: 2 }], 3600, 3), 130)
 })
