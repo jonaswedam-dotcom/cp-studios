@@ -214,7 +214,7 @@ function drawScene(canvas, mults, geom, balls, litSlots, pegHits, now) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function PlinkoGame() {
-  const { balance, placeBet } = useCasino()
+  const { balance, placeBet, adjustBalance } = useCasino()
 
   const [bet,           setBet]           = useState(50)
   const [rows,          setRows]          = useState(8)
@@ -222,17 +222,20 @@ export default function PlinkoGame() {
   const [autoActive,    setAutoActive]    = useState(false)
   const [recentResults, setRecentResults] = useState([])
   const [ballsActive,   setBallsActive]   = useState(false)
+  const [inFlight,      setInFlight]      = useState(0)   // reactive mirror of inFlightRef
 
-  const canvasRef    = useRef(null)
-  const rafRef       = useRef(null)
-  const autoRef      = useRef(null)
-  const loopUntilRef = useRef(0)        // keep RAF alive until this ts for slot fade
-  const ballsRef     = useRef([])        // active ball objects
-  const litSlotsRef  = useRef({})        // { slotIdx: landingTimestamp }
-  const pegHitsRef   = useRef({})        // { "x_y": strikeTimestamp } for strike pops
-  const ballIdRef    = useRef(0)
-  const inFlightRef  = useRef(0)         // sum of bet amounts currently animating
-  const balanceRef   = useRef(balance)
+  const canvasRef       = useRef(null)
+  const rafRef          = useRef(null)
+  const autoRef         = useRef(null)
+  const loopUntilRef    = useRef(0)        // keep RAF alive until this ts for slot fade
+  const ballsRef        = useRef([])        // active ball objects
+  const litSlotsRef     = useRef({})        // { slotIdx: landingTimestamp }
+  const pegHitsRef      = useRef({})        // { "x_y": strikeTimestamp } for strike pops
+  const ballIdRef       = useRef(0)
+  const inFlightRef     = useRef(0)         // sum of bet amounts currently animating
+  const balanceRef      = useRef(balance)
+  const adjustBalanceRef = useRef(adjustBalance)
+  adjustBalanceRef.current = adjustBalance
   const betRef       = useRef(bet)
   const geomRef      = useRef(makeGeom(8))
   const multsRef     = useRef(MULT_TABLE[8]['medium'])
@@ -319,6 +322,7 @@ export default function PlinkoGame() {
 
         finished.forEach(ball => {
           inFlightRef.current = Math.max(0, inFlightRef.current - ball.bet)
+          setInFlight(inFlightRef.current)
           placeBet('plinko', ball.bet, ball.winAmount).then(() => {
             setRecentResults(prev => {
               const next = [{ mult: ball.mult, winAmount: ball.winAmount }, ...prev]
@@ -367,6 +371,7 @@ export default function PlinkoGame() {
     const color = BALL_COLORS[id % BALL_COLORS.length]
 
     inFlightRef.current += b
+    setInFlight(inFlightRef.current)
 
     ballsRef.current.push({
       id, pts, slot, mult, winAmount, bet: b, color, msPerSeg,
@@ -427,13 +432,16 @@ export default function PlinkoGame() {
     }
   }, [balance, bet, autoActive])
 
-  // Cleanup RAF + interval on unmount
+  // Cleanup on unmount: cancel animation + forfeit any bets still in flight.
+  // Without this, navigating away mid-game is a free play (same exploit as Blackjack).
   useEffect(() => () => {
     if (rafRef.current)  cancelAnimationFrame(rafRef.current)
     if (autoRef.current) clearInterval(autoRef.current)
+    if (inFlightRef.current > 0) adjustBalanceRef.current(-inFlightRef.current)
   }, [])
 
-  const canDrop = balance !== null && bet >= 1 && balance >= bet
+  const availableBalance = (balance ?? 0) - inFlight
+  const canDrop = balance !== null && bet >= 1 && availableBalance >= bet
 
   return (
     <GameLayout title="Plinko" wide>

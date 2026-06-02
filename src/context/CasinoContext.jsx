@@ -205,7 +205,16 @@ export function CasinoProvider({ children }) {
         p_win_amount: winAmount,
       })
       if (error) {
-        console.error('[CasinoContext] settle_bet error:', error)
+        // settle_bet RPC unavailable (migration 032 not yet applied) — fall back
+        // to direct writes so coins always arrive. Not donation-race-safe but
+        // functional until the migration is run.
+        console.warn('[CasinoContext] settle_bet unavailable, using direct write fallback:', error.message)
+        const [walletRes, histRes] = await Promise.all([
+          supabase.from('wallets').update({ balance: newBalance }).eq('user_id', userId),
+          supabase.from('game_history').insert({ user_id: userId, game, bet, result, payout }),
+        ])
+        if (walletRes.error) console.error('[CasinoContext] wallet update error:', walletRes.error)
+        if (histRes.error)   console.error('[CasinoContext] history insert error:', histRes.error)
       } else if (actualBalance !== null && actualBalance !== undefined) {
         // Reconcile local state with the actual DB balance (picks up any donations
         // that arrived while this write was in flight).
