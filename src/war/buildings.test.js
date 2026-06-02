@@ -40,12 +40,12 @@ test('global economy multipliers sum building levels', () => {
 })
 
 test('incomePerTick scales with bank levels and tick length', () => {
-  // 2 bank levels, 3600s tick, 50 coins/level/hour -> 100
-  assert.equal(incomePerTick([{ type: 'bank', level: 2 }], 3600), 100)
+  // 2 bank levels, 3600s tick, 125 coins/level/hour -> 250
+  assert.equal(incomePerTick([{ type: 'bank', level: 2 }], 3600), 250)
 })
 
 test('income includes per-province trickle', () => {
-  assert.equal(INCOME_PER_PROVINCE_PER_HOUR, 10)
-  // 2 banks (×50) + 3 provinces (×10) = 130/hr; one hour tick → 130
-  assert.equal(incomePerTick([{ type: 'bank', level: 2 }], 3600, 3), 130)
+  assert.equal(INCOME_PER_PROVINCE_PER_HOUR, 25)
+  // 2 banks (×125) + 3 provinces (×25) = 325/hr; one hour tick → 325
+  assert.equal(incomePerTick([{ type: 'bank', level: 2 }], 3600, 3), 325)
 })

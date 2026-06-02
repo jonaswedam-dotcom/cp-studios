@@ -31,3 +31,6 @@ Thumbs.db
 
 # Brainstorming visual-companion scratch files
 .superpowers/
+
+# Supabase CLI local link metadata
+supabase/.temp/

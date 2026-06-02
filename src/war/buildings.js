@@ -1,6 +1,6 @@
 export const SLOTS_PER_REGION = 3
-export const INCOME_PER_BANK_LEVEL_PER_HOUR = 50 // tunable
-export const INCOME_PER_PROVINCE_PER_HOUR = 10
+export const INCOME_PER_BANK_LEVEL_PER_HOUR = 125 // tunable
+export const INCOME_PER_PROVINCE_PER_HOUR = 25
 
 export const BUILDINGS = {
   bunker:  { label: 'Bunker',      kind: 'defense', cost: [800, 1600, 3200],  desc: 'Defenders here fight much harder.' },

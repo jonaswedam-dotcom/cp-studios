@@ -25,9 +25,11 @@ test('soldier/tank/jet strengths still match the legacy war_unit_strength() in 0
   }
 })
 
-test('bank income 50/level/hour matches buildings.js + 023', () => {
-  assert.equal(INCOME_PER_BANK_LEVEL_PER_HOUR, 50)
-  assert.match(mig('023_war_tick.sql'), /lv \* 50/)
+test('bank income 125/level/hour matches buildings.js + live tick (048)', () => {
+  // Raised 50→125 in migration 048 (income rebalance). 023's lv*50 / 038's banklv*50 superseded.
+  assert.equal(INCOME_PER_BANK_LEVEL_PER_HOUR, 125)
+  assert.match(mig('048_war_income_rebalance.sql'), /banklv\*125/)
+  assert.match(mig('023_war_tick.sql'), /lv \* 50/) // historical original, now superseded
 })
 
 test('loot uses COIN_PER_STRENGTH (15) in the live tick (038)', () => {
@@ -54,9 +56,11 @@ test('soldier/tank/jet stack strengths match war_stack_strength() in 026', () =>
   // warship strength was raised to 20 in migration 036 (see the OP-warship test below).
 })
 
-test('province income 10/hr matches 027', () => {
-  assert.equal(INCOME_PER_PROVINCE_PER_HOUR, 10)
-  assert.match(mig('027_war_income_territory.sql'), /provinces\*10|provinces \* 10/)
+test('province income 25/hr matches buildings.js + live tick (048)', () => {
+  // Raised 10→25 in migration 048 (income rebalance). 027/038's provinces*10 superseded.
+  assert.equal(INCOME_PER_PROVINCE_PER_HOUR, 25)
+  assert.match(mig('048_war_income_rebalance.sql'), /provinces\*25/)
+  assert.match(mig('027_war_income_territory.sql'), /provinces\*10|provinces \* 10/) // historical, superseded
 })
 
 test('START_ARMY soldiers match war_spawn() in 028', () => {
@@ -64,12 +68,12 @@ test('START_ARMY soldiers match war_spawn() in 028', () => {
   assert.match(mig('028_war_spawn.sql'), /true, 500, 0, 0, 0/)
 })
 
-// 038 is the LIVE war_tick() (last create-or-replace in apply order: 023→026→027→034→036→038).
+// 048 is the LIVE war_tick() (last create-or-replace in apply order: 023→026→027→034→036→038→048).
 // Guard the live copy directly so drift in the actually-running tick is caught.
-test('live tick (038) carries the combat + income constants', () => {
-  const sql = mig('038_war_balance.sql')
-  assert.match(sql, /banklv\*50/)                    // bank income 50/level/hr
-  assert.match(sql, /provinces\*10/)                 // per-province 10/hr
+test('live tick (048) carries the combat + income constants', () => {
+  const sql = mig('048_war_income_rebalance.sql')
+  assert.match(sql, /banklv\*125/)                   // bank income 125/level/hr (raised 50→125 in 048)
+  assert.match(sql, /provinces\*25/)                 // per-province 25/hr (raised 10→25 in 048)
   assert.match(sql, /0\.8 \* def_raw \* 15/)         // loot (raised 5→15 in 038)
   assert.match(sql, /0\.85 \+ random\(\) \* 0\.30/)  // RNG band
   assert.match(sql, /\* 0\.25/)                      // attacker retreat

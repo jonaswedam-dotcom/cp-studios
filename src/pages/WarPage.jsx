@@ -13,7 +13,7 @@ import { UNITS, UNIT_TYPES, formatDuration } from '../war/units.js'
 import { describeEvent } from '../war/events.js'
 import { troopCost, armySizeMultiplier } from '../war/economy.js'
 import { emptyStack } from '../war/combat.js'
-import { BUILDINGS, costMultiplier, strengthMultiplier, buildingCost, SLOTS_PER_REGION } from '../war/buildings.js'
+import { BUILDINGS, costMultiplier, strengthMultiplier, buildingCost, SLOTS_PER_REGION, INCOME_PER_BANK_LEVEL_PER_HOUR, INCOME_PER_PROVINCE_PER_HOUR } from '../war/buildings.js'
 import { validateMove } from '../war/movement.js'
 import { computeTargets, sourcesForDest } from '../war/targeting.js'
 import { pickRandomSpawn } from '../war/spawn.js'
@@ -81,7 +81,7 @@ function WarGame() {
   const incoming = movements.filter((m) => m.status === 'moving' && m.player_id !== userId && myRegionIds.has(m.to_region))
   const shieldMsLeft = me?.shield_until ? new Date(me.shield_until).getTime() - now : 0
   const banksLevel = myBuildings.filter((b) => b.type === 'bank').reduce((s, b) => s + b.level, 0)
-  const incomePerHour = banksLevel * 50 + myRegionRows.length * 10
+  const incomePerHour = banksLevel * INCOME_PER_BANK_LEVEL_PER_HOUR + myRegionRows.length * INCOME_PER_PROVINCE_PER_HOUR
 
   // One toast slot: replace any in-flight timer so a newer message isn't blanked early by an
   // older 4s timeout, and clear it on unmount.
