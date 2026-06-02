@@ -1,17 +1,30 @@
 // Single source of truth for unit stats. All values are tunable.
-// Travel times are tuned for an active, fast-paced session (single-digit minutes):
-// the world advances via the per-minute server tick, so the practical floor on an
-// attack leg is the tick cadence. Moves WITHIN your own territory (reinforcing a
-// province you already own) resolve instantly client-side — see WarPage handleMove —
-// so these leg times only apply to attacks on enemy/neutral provinces.
+// Travel times are DISTANCE-BASED: a leg between two provinces takes longer the farther
+// apart their centroids are, scaled between each unit's [min, max] over a NEAR..FAR band
+// (see travelSecondsFor). A typical inter-country hop (≤ ~400km) lands at the floor; the
+// longest reachable legs hit the cap. Soldiers run 3m→10m; jets stay the fastest (1m→3m).
+// Moves WITHIN your own territory (reinforcing a province you already own) resolve instantly
+// client-side — see WarPage handleMove — so these leg times only apply to attacks.
 export const UNITS = {
-  soldier: { label: 'Soldier', strength: 1, cost: 100, mode: 'land', travelSeconds: 180 },   // 3m
-  tank:    { label: 'Tank',    strength: 5, cost: 400, mode: 'land', travelSeconds: 300 },   // 5m
-  jet:     { label: 'Jet',     strength: 3, cost: 800, mode: 'air',  travelSeconds: 60, airRangeKm: 4500 }, // 1m
-  warship: { label: 'Warship', strength: 2, cost: 600, mode: 'sea',  travelSeconds: 300, seaRangeKm: 7000 }, // 5m
+  soldier: { label: 'Soldier', strength: 1, cost: 100, mode: 'land', minTravelSeconds: 180, maxTravelSeconds: 600 },  // 3m → 10m
+  tank:    { label: 'Tank',    strength: 5, cost: 400, mode: 'land', minTravelSeconds: 240, maxTravelSeconds: 600 },  // 4m → 10m
+  jet:     { label: 'Jet',     strength: 3, cost: 800, mode: 'air',  minTravelSeconds: 60,  maxTravelSeconds: 180, airRangeKm: 4500 }, // 1m → 3m
+  warship: { label: 'Warship', strength: 2, cost: 600, mode: 'sea',  minTravelSeconds: 240, maxTravelSeconds: 600, seaRangeKm: 7000 }, // 4m → 10m
 }
 
 export const UNIT_TYPES = ['soldier', 'tank', 'jet', 'warship']
+
+// Distance band (km) over which travel time scales from each unit's min to its max.
+export const TRAVEL_NEAR_KM = 400
+export const TRAVEL_FAR_KM = 4000
+
+// Travel time (seconds) for one unit type over a leg of `distanceKm`, linearly
+// interpolated across its [min, max] band and clamped at both ends.
+export function travelSecondsFor(type, distanceKm) {
+  const u = UNITS[type]
+  const frac = Math.max(0, Math.min(1, (distanceKm - TRAVEL_NEAR_KM) / (TRAVEL_FAR_KM - TRAVEL_NEAR_KM)))
+  return Math.round(u.minTravelSeconds + (u.maxTravelSeconds - u.minTravelSeconds) * frac)
+}
 
 // What a freshly-spawned player gets on their starting province.
 export const START_ARMY = { soldier: 500, tank: 0, jet: 0, warship: 0 }

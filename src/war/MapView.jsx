@@ -81,7 +81,7 @@ export default function MapView({ graph, regions, movements, buildings = [], onR
       const res = await fetch('/war/provinces.topojson')
       const topo = await res.json()
       const gj = feature(topo, topo.objects.p) // TopoJSON -> GeoJSON FeatureCollection
-      map.addSource('provinces', { type: 'geojson', data: gj, promoteId: 'adm1_code' })
+      map.addSource('provinces', { type: 'geojson', data: gj, promoteId: 'region_id' })
       map.addLayer({
         id: 'province-fills', type: 'fill', source: 'provinces',
         paint: {
@@ -110,7 +110,7 @@ export default function MapView({ graph, regions, movements, buildings = [], onR
       })
       map.on('click', 'province-fills', (e) => {
         const f = e.features?.[0]
-        if (f) onClickRef.current(f.properties.adm1_code)
+        if (f) onClickRef.current(f.properties.region_id)
       })
       map.getCanvas().style.cursor = 'pointer'
       readyRef.current = true
