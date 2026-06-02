@@ -103,6 +103,7 @@ export default function AviatorGame() {
     }
     if (updated.status === 'crashed') {
       cancelAnimationFrame(rafRef.current)
+      setError('')
       setCrashAnimating(true)
       fetchHistoryRef.current()
       crashTimerRef.current = setTimeout(() => {
@@ -150,7 +151,9 @@ export default function AviatorGame() {
       const r = roundRef.current
       if (!r?.started_at) return
       const elapsed = (Date.now() - new Date(r.started_at).getTime()) / 1000
-      setLocalMult(+Math.exp(GROWTH_RATE * Math.max(0, elapsed)).toFixed(2))
+      // Cap at 100 — the server never generates crash points above 100x,
+      // so a higher value means the crash Realtime event hasn't arrived yet.
+      setLocalMult(Math.min(100, +Math.exp(GROWTH_RATE * Math.max(0, elapsed)).toFixed(2)))
       rafRef.current = requestAnimationFrame(tick)
     }
     rafRef.current = requestAnimationFrame(tick)
@@ -360,6 +363,13 @@ export default function AviatorGame() {
             {isFlying && !hasBet && (
               <div className="text-center py-3 rounded-xl bg-cp-elevated border border-cp-border text-cp-muted text-sm">
                 Watching — place a bet next round
+              </div>
+            )}
+
+            {/* Flying: bet marked lost before round crash event arrives */}
+            {isFlying && hasBet && myBet?.status === 'lost' && (
+              <div className="text-center py-3 rounded-xl bg-red-400/10 border border-red-400/25 text-red-400 font-semibold text-sm">
+                Round crashed — lost {formatCoins(myBet.bet_amount)} coins
               </div>
             )}
 
