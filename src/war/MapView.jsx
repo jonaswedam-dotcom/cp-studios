@@ -61,12 +61,13 @@ function targetMarkerEl(kind, onClick, defenders = null) {
   return wrap
 }
 
-export default function MapView({ graph, regions, movements, buildings = [], onRegionClick, targets = [], focus = null }) {
+export default function MapView({ graph, regions, movements, buildings = [], onRegionClick, targets = [], underAttack = [], focus = null }) {
   const mapRef     = useRef(null)
   const containerRef = useRef(null)
   const markersRef = useRef([])     // unit/HQ markers
   const moveMarkersRef = useRef({}) // movement id -> marker
   const targetMarkersRef = useRef([]) // clickable hexagon target badges
+  const ringMarkersRef = useRef([]) // pulsing red rings on my provinces under attack
   const readyRef   = useRef(false)
   const [ready, setReady] = useState(false) // state (not just ref) so paint effects re-run once the map is loaded
   const onClickRef = useRef(onRegionClick)
@@ -194,6 +195,24 @@ export default function MapView({ graph, regions, movements, buildings = [], onR
     })
   }
   useEffect(syncTargets, [targets, graph, ready])
+
+  // Pulsing red ring on each of my provinces with an enemy force inbound (pointer-events off so
+  // it never blocks a click). Reuses the war-target-pulse keyframe injected on init.
+  const syncRings = () => {
+    const map = mapRef.current
+    if (!map || !readyRef.current || !graph) return
+    ringMarkersRef.current.forEach((m) => m.remove())
+    ringMarkersRef.current = []
+    underAttack.forEach((id) => {
+      const c = graph.regions[id]?.centroid
+      if (!c) return
+      const el = document.createElement('div')
+      el.style.cssText = 'width:34px;height:34px;border-radius:50%;border:2px solid #ef4444;' +
+        'box-shadow:0 0 12px #ef4444;pointer-events:none;animation:war-target-pulse 1.2s ease-in-out infinite'
+      ringMarkersRef.current.push(new maplibregl.Marker({ element: el }).setLngLat(c).addTo(map))
+    })
+  }
+  useEffect(syncRings, [underAttack, graph, ready])
 
   // On open, zoom from the world view into the player's HQ island (once per mount).
   useEffect(() => {

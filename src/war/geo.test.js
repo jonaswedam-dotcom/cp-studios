@@ -67,6 +67,15 @@ test('landReachable includes same-landmass provinces within range, not just dire
   assert.ok(!reach.includes('H'), 'excludes self')
 })
 
+test('landReachable drops a dangling neighbour id not present in the graph', () => {
+  // A "borders" a phantom Z that has no row in the graph (a stale adjacency reference).
+  // Without a membership filter, Z leaks through as a clickable target with a null centroid.
+  const g = { regions: {
+    A: { centroid: [0, 0], coastal: false, neighbors: ['Z'] },
+  } }
+  assert.deepEqual(landReachable('A', g, 2000), [])
+})
+
 test('landReachable always includes a direct border neighbour even past the range cap', () => {
   // A and B border each other but their centroids are ~4450km apart (huge adjacent countries).
   const g = { regions: {

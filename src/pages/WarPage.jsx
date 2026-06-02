@@ -17,6 +17,7 @@ import { BUILDINGS, costMultiplier, strengthMultiplier, buildingCost, SLOTS_PER_
 import { validateMove } from '../war/movement.js'
 import { computeTargets, sourcesForDest } from '../war/targeting.js'
 import { pickRandomSpawn } from '../war/spawn.js'
+import { rankPlayers } from '../war/leaderboard.js'
 
 // Flip to false to enable the live game.
 const COMING_SOON = false
@@ -49,7 +50,7 @@ function WarGame() {
   const userId   = session?.user?.id
   const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || 'Player'
 
-  const { graph, regions, players, movements, buildings, events, loading } = useWarData(userId)
+  const { graph, regions, players, movements, buildings, events, loading, graphError } = useWarData(userId)
 
   const [showBuy, setShowBuy]     = useState(false)
   const [sendTo, setSendTo]       = useState(null)    // destination region_id for the send panel
@@ -59,6 +60,7 @@ function WarGame() {
   const [flash, setFlash]         = useState('')
   const initRef = useRef(false)
   const lastEventId = useRef(0)
+  const flashTimer = useRef(null)
 
   const me = players.find((p) => p.user_id === userId) || null
   const myRegionRows = Object.values(regions).filter((r) => r.owner_id === userId)
@@ -81,7 +83,14 @@ function WarGame() {
   const banksLevel = myBuildings.filter((b) => b.type === 'bank').reduce((s, b) => s + b.level, 0)
   const incomePerHour = banksLevel * 50 + myRegionRows.length * 10
 
-  const showFlash = (m) => { setFlash(m); setTimeout(() => setFlash(''), 4000) }
+  // One toast slot: replace any in-flight timer so a newer message isn't blanked early by an
+  // older 4s timeout, and clear it on unmount.
+  const showFlash = (m) => {
+    setFlash(m)
+    if (flashTimer.current) clearTimeout(flashTimer.current)
+    flashTimer.current = setTimeout(() => setFlash(''), 4000)
+  }
+  useEffect(() => () => { if (flashTimer.current) clearTimeout(flashTimer.current) }, [])
 
   // ── Event toasts: fire showFlash for each newly-arrived event ───────────────
   useEffect(() => {
@@ -104,7 +113,7 @@ function WarGame() {
       const used = new Set(players.map((p) => p.color))
       const color = PLAYER_COLORS.find((c) => !used.has(c)) || PLAYER_COLORS[players.length % PLAYER_COLORS.length]
       const spawn = pickRandomSpawn(graph, claimed, Math.random)
-      if (!spawn) { showFlash('The world is full!'); return }
+      if (!spawn) { initRef.current = false; showFlash('The world is full!'); return }
 
       const { data: spawned, error } = await supabase.rpc('war_spawn', {
         p_region: spawn, p_country: graph.regions[spawn]?.country || null, p_color: color, p_name: userName,
@@ -133,7 +142,7 @@ function WarGame() {
         const { error: pErr } = await supabase.from('war_regions')
           .update({ [type]: (portRow[type] || 0) + count, updated_at: new Date().toISOString() })
           .eq('region_id', portRow.region_id)
-        if (pErr) { showFlash('Purchase failed.'); return }
+        if (pErr) { showFlash(`Purchase failed: ${pErr.message || pErr.code || 'unknown error'}`); return }
         await adjustBalance(-cost)
         showFlash(`+${count} ${UNITS[type].label}${count > 1 ? 's' : ''} at ${graph.regions[portRow.region_id]?.city || portRow.region_id}`)
         return
@@ -219,7 +228,7 @@ function WarGame() {
       if ((balance ?? 0) < cost) { showFlash('Not enough coins.'); return }
       if (buildingsIn(buildFor).length >= SLOTS_PER_REGION) { showFlash('No slots left.'); return }
       const { error } = await supabase.from('war_buildings').insert({ region_id: buildFor, owner_id: userId, type, level: 1 })
-      if (error) { showFlash('Build failed.'); return }
+      if (error) { showFlash(`Build failed: ${error.message || error.code || 'unknown error'}`); return }
       await adjustBalance(-cost)
       showFlash(`Built ${BUILDINGS[type]?.label || type}.`)
     } finally { setBusy(false) }
@@ -266,6 +275,14 @@ function WarGame() {
     return computeTargets(regions, graph, { userId, shieldedOwnerIds })
   }, [graph, userId, regions, shieldedOwnerIds])
 
+  // My provinces with an enemy force inbound — surfaced as a pulsing red ring on the map so an
+  // incoming attack isn't only visible in the sidebar list.
+  const underAttackIds = useMemo(
+    () => [...new Set(movements
+      .filter((m) => m.status === 'moving' && m.player_id !== userId && regions[m.to_region]?.owner_id === userId)
+      .map((m) => m.to_region))],
+    [movements, regions, userId])
+
   // Where to drop the camera on open: the HQ city province (fall back to any owned
   // province, then the recorded spawn). Centroid identity stays stable while the HQ
   // doesn't move, so MapView only flies once per open.
@@ -296,10 +313,17 @@ function WarGame() {
     setSendTo(regionId); setSendSources(sources)
   }, [regions, userId, graph, shieldedOwnerIds])
 
-  const leaderboard = players
-    .map((p) => ({ ...p, regionCount: Object.values(regions).filter((r) => r.owner_id === p.user_id).length }))
-    .sort((a, b) => b.regionCount - a.regionCount)
-    .slice(0, 8)
+  const leaderboard = rankPlayers(players, regions, buildings)
+
+  if (graphError && !graph) return (
+    <div className="min-h-screen bg-cp-bg flex items-center justify-center">
+      <div className="text-center space-y-3">
+        <p className="text-cp-text text-sm font-medium">Couldn't load the war map.</p>
+        <p className="text-cp-muted text-xs">Check your connection and try again.</p>
+        <button onClick={() => window.location.reload()} className="px-4 py-2 rounded-xl border border-cp-border text-cp-text text-sm hover:bg-cp-elevated transition-colors">Retry</button>
+      </div>
+    </div>
+  )
 
   if (loading || !graph) return (
     <div className="min-h-screen bg-cp-bg flex items-center justify-center">
@@ -335,7 +359,7 @@ function WarGame() {
       )}
 
       <div className="relative flex-1 overflow-hidden">
-        <MapView graph={graph} regions={regions} movements={movements} buildings={buildings} onRegionClick={onRegionClick} targets={targets} focus={focus} />
+        <MapView graph={graph} regions={regions} movements={movements} buildings={buildings} onRegionClick={onRegionClick} targets={targets} underAttack={underAttackIds} focus={focus} />
         <div className="absolute top-3 left-3 z-10 bg-cp-card/90 border border-cp-border rounded-xl px-3 py-2 text-[11px] text-cp-muted shadow-xl backdrop-blur-sm pointer-events-none space-y-0.5">
           <p className="flex items-center gap-1.5"><span className="text-red-400">⬡</span> Tap a glowing tile to attack / take it</p>
           <p className="flex items-center gap-1.5"><span className="text-sky-300">⬡</span> Tap your own land to build or reinforce</p>

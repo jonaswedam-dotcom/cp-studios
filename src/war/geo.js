@@ -59,7 +59,9 @@ function landComponentMap(graph) {
 // PLUS any same-landmass province whose centroid is within rangeKm. The landmass constraint
 // stops soldiers "swimming" across open sea — crossing to another landmass still needs a warship.
 export function landReachable(id, graph, rangeKm) {
-  const out = new Set(landNeighbors(id, graph))
+  // Seed with direct neighbours that actually exist in the graph — a stale adjacency id with
+  // no region row would otherwise leak through as a clickable target with a null centroid.
+  const out = new Set(landNeighbors(id, graph).filter((n) => graph.regions[n]))
   const from = centroidOf(id, graph)
   if (from) {
     const comp = landComponentMap(graph)

@@ -65,7 +65,7 @@ export default function Sidebar({ me, myRegions, myUnits, balance, leaderboard, 
                 <span className="text-xs text-cp-muted/60 w-4 text-right">{i + 1}</span>
                 <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: p.color }} />
                 <span className="flex-1 text-xs text-cp-text truncate">{p.display_name}</span>
-                <span className="text-xs text-cp-muted">{p.regionCount} prov.</span>
+                <span className="text-xs text-cp-muted" title={`${p.regionCount} prov · ${(p.strength ?? 0).toLocaleString()} str · ${p.buildingLevels ?? 0} bld`}>{Math.round(p.power ?? p.regionCount ?? 0).toLocaleString()} pwr</span>
               </div>
             ))}
           </div>

@@ -10,13 +10,17 @@ export function useWarData(userId) {
   const [buildings, setBuildings] = useState([])
   const [events, setEvents]       = useState([])
   const [loading, setLoading]     = useState(true)
+  const [graphError, setGraphError] = useState(null)
   const graphLoaded = useRef(false)
 
   // Province graph (static asset)
   useEffect(() => {
     if (graphLoaded.current) return
     graphLoaded.current = true
-    fetch('/war/provinces.json').then(r => r.json()).then(setGraph).catch(e => console.error('graph load', e))
+    fetch('/war/provinces.json')
+      .then(r => { if (!r.ok) throw new Error(`provinces.json ${r.status}`); return r.json() })
+      .then(setGraph)
+      .catch(e => { console.error('graph load', e); setGraphError(e) })
   }, [])
 
   const loadAll = useCallback(async () => {
@@ -102,5 +106,5 @@ export function useWarData(userId) {
     return () => supabase.removeChannel(ch)
   }, [userId])
 
-  return { graph, regions, players, movements, buildings, events, loading, setRegions, loadAll }
+  return { graph, regions, players, movements, buildings, events, loading, graphError, setRegions, loadAll }
 }
