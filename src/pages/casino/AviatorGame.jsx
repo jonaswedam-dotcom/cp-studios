@@ -215,6 +215,38 @@ export default function AviatorGame() {
       <div className="flex flex-col items-center gap-6">
         <div className="w-full max-w-md">
           <HistoryBar items={history} />
+
+          {/* Multiplier — above the board, always left-aligned, never clipped */}
+          <div style={{ paddingBottom: 8, paddingLeft: 4 }}>
+            <div
+              ref={multTextRef}
+              style={{
+                fontFamily: '"Playfair Display", Georgia, serif',
+                fontWeight: 800,
+                fontSize: 52,
+                color: isCrashed ? '#f87171' : isBetting ? '#7a7570' : '#fde68a',
+                textShadow: isCrashed
+                  ? '0 0 26px rgba(239,68,68,0.5)'
+                  : isBetting ? 'none'
+                  : '0 0 30px rgba(251,191,36,0.5)',
+                lineHeight: 1,
+              }}
+            >
+              {multiplier.toFixed(2)}×
+            </div>
+            {isBetting && (
+              <div style={{ fontSize: 11, color: '#78716c', marginTop: 4 }}>Ready for takeoff</div>
+            )}
+            {isFlying && (
+              <div style={{ fontSize: 12, color: '#a8a29e', marginTop: 4 }}>
+                Bet {bet} · cash out for{' '}
+                <b style={{ color: '#fcd34d' }}>
+                  <span ref={multSubRef}>{formatCoins(liveWin)}</span>
+                </b>
+              </div>
+            )}
+          </div>
+
           <div style={{ position: 'relative' }}>
             <FlightBoard
               phase={phase}
@@ -223,38 +255,6 @@ export default function AviatorGame() {
               cashedOutAt={cashedOutAt}
               bet={bet}
             />
-
-            {/* Multiplier — pinned to the very left, updated imperatively each RAF frame */}
-            <div style={{ position: 'absolute', left: 12, top: 12, pointerEvents: 'none' }}>
-              <div
-                ref={multTextRef}
-                style={{
-                  fontFamily: '"Playfair Display", Georgia, serif',
-                  fontWeight: 800,
-                  fontSize: 'clamp(34px, 12vw, 52px)',
-                  color: isCrashed ? '#f87171' : isBetting ? '#7a7570' : '#fde68a',
-                  textShadow: isCrashed
-                    ? '0 0 26px rgba(239,68,68,0.5)'
-                    : isBetting ? 'none'
-                    : '0 0 30px rgba(251,191,36,0.5)',
-                  lineHeight: 1,
-                }}
-              >
-                {multiplier.toFixed(2)}×
-              </div>
-              {isBetting && (
-                <div style={{ fontSize: 11, color: '#78716c', marginTop: 4 }}>Ready for takeoff</div>
-              )}
-              {isFlying && (
-                <div style={{ fontSize: 12, color: '#a8a29e', marginTop: 4 }}>
-                  Bet {bet} · cash out for{' '}
-                  <b style={{ color: '#fcd34d' }}>
-                    <span ref={multSubRef}>{formatCoins(liveWin)}</span>
-                  </b>
-                </div>
-              )}
-            </div>
-
             {bigWin && <BigWinBurst multiplier={bigWin.multiplier} amount={bigWin.amount} />}
           </div>
         </div>
