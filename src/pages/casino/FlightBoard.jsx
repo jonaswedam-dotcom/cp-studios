@@ -121,26 +121,6 @@ export default function FlightBoard({ phase, multiplier, crashPoint, cashedOutAt
         />
       </svg>
 
-      <div style={{ position: 'absolute', left: '7%', top: '11%', pointerEvents: 'none' }}>
-        <div
-          style={{
-            fontFamily: '"Playfair Display", Georgia, serif',
-            fontWeight: 800,
-            fontSize: 'clamp(34px, 12vw, 52px)',
-            color: multColor,
-            textShadow: multShadow,
-            lineHeight: 1,
-          }}
-        >
-          {multiplier.toFixed(2)}×
-        </div>
-        {betting && <div style={{ fontSize: 11, color: '#78716c', marginTop: 4 }}>Ready for takeoff</div>}
-        {flying && (
-          <div style={{ fontSize: 12, color: '#a8a29e', marginTop: 4 }}>
-            Bet {bet} · cash out for <b style={{ color: '#fcd34d' }}>{Math.floor(bet * (multiplier - 1))}</b>
-          </div>
-        )}
-      </div>
 
       {crashed && (
         <div style={{ position: 'absolute', left: '7%', top: '40%', fontWeight: 800, letterSpacing: 2, color: '#f87171', fontSize: 14 }}>

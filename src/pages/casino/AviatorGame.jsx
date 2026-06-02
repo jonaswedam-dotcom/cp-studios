@@ -101,6 +101,10 @@ export default function AviatorGame() {
   const settledRef = useRef(false) // ensures a round settles (pays out) exactly once
   const betRef = useRef(bet)
   const placeBetRef = useRef(placeBet)
+  // Refs for imperative DOM updates — the multiplier text updates every RAF frame
+  // without going through React's reconciliation cycle, keeping it perfectly smooth.
+  const multTextRef = useRef(null)
+  const multSubRef  = useRef(null)
 
   useEffect(() => { betRef.current = bet }, [bet])
   useEffect(() => { placeBetRef.current = placeBet }, [placeBet])
@@ -135,6 +139,9 @@ export default function AviatorGame() {
         return
       }
       multiplierRef.current = m
+      // Update the display text directly — no React re-render needed for the number
+      if (multTextRef.current) multTextRef.current.textContent = `${+m.toFixed(2)}×`
+      if (multSubRef.current)  multSubRef.current.textContent  = formatCoins(Math.floor(betRef.current * (m - 1)))
       setMultiplier(+m.toFixed(2))
       rafRef.current = requestAnimationFrame(tick)
     }
@@ -216,6 +223,38 @@ export default function AviatorGame() {
               cashedOutAt={cashedOutAt}
               bet={bet}
             />
+
+            {/* Multiplier — pinned to the very left, updated imperatively each RAF frame */}
+            <div style={{ position: 'absolute', left: 12, top: 12, pointerEvents: 'none' }}>
+              <div
+                ref={multTextRef}
+                style={{
+                  fontFamily: '"Playfair Display", Georgia, serif',
+                  fontWeight: 800,
+                  fontSize: 'clamp(34px, 12vw, 52px)',
+                  color: isCrashed ? '#f87171' : isBetting ? '#7a7570' : '#fde68a',
+                  textShadow: isCrashed
+                    ? '0 0 26px rgba(239,68,68,0.5)'
+                    : isBetting ? 'none'
+                    : '0 0 30px rgba(251,191,36,0.5)',
+                  lineHeight: 1,
+                }}
+              >
+                {multiplier.toFixed(2)}×
+              </div>
+              {isBetting && (
+                <div style={{ fontSize: 11, color: '#78716c', marginTop: 4 }}>Ready for takeoff</div>
+              )}
+              {isFlying && (
+                <div style={{ fontSize: 12, color: '#a8a29e', marginTop: 4 }}>
+                  Bet {bet} · cash out for{' '}
+                  <b style={{ color: '#fcd34d' }}>
+                    <span ref={multSubRef}>{formatCoins(liveWin)}</span>
+                  </b>
+                </div>
+              )}
+            </div>
+
             {bigWin && <BigWinBurst multiplier={bigWin.multiplier} amount={bigWin.amount} />}
           </div>
         </div>
