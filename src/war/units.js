@@ -9,7 +9,11 @@ export const UNITS = {
   soldier: { label: 'Soldier', strength: 1, cost: 100, mode: 'land', minTravelSeconds: 180, maxTravelSeconds: 600 },  // 3m → 10m
   tank:    { label: 'Tank',    strength: 5, cost: 400, mode: 'land', minTravelSeconds: 240, maxTravelSeconds: 600 },  // 4m → 10m
   jet:     { label: 'Jet',     strength: 3, cost: 800, mode: 'air',  minTravelSeconds: 60,  maxTravelSeconds: 180, airRangeKm: 4500 }, // 1m → 3m
-  warship: { label: 'Warship', strength: 2, cost: 600, mode: 'sea',  minTravelSeconds: 240, maxTravelSeconds: 600, seaRangeKm: 7000 }, // 4m → 10m
+  // Warships are a premium naval unit: expensive and very strong (strength 20), and they
+  // ALSO ferry land units (see WARSHIP_CAPACITY). They require a Port to build and deploy to
+  // one — so the `strength`/cost here MUST stay in sync with war_stack_strength() + the tick
+  // defender formula in supabase/migrations/036_war_ports_and_warship.sql (parity.test.js).
+  warship: { label: 'Warship', strength: 20, cost: 4000, mode: 'sea', minTravelSeconds: 240, maxTravelSeconds: 600, seaRangeKm: 7000, requiresPort: true }, // 4m → 10m
 }
 
 export const UNIT_TYPES = ['soldier', 'tank', 'jet', 'warship']

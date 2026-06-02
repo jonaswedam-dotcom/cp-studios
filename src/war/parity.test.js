@@ -15,9 +15,11 @@ import { neutralGarrison } from './neutral.js'
 const here = dirname(fileURLToPath(import.meta.url))
 const mig = (f) => readFileSync(join(here, '..', '..', 'supabase', 'migrations', f), 'utf8')
 
-test('unit strengths match war_unit_strength() in 023', () => {
+test('soldier/tank/jet strengths still match the legacy war_unit_strength() in 023', () => {
+  // warship strength was raised to 20 in migration 036 (see the OP-warship test below),
+  // so it no longer matches the historical literal in 023.
   const sql = mig('023_war_tick.sql')
-  for (const [t, s] of [['soldier', 1], ['tank', 5], ['jet', 3], ['warship', 2]]) {
+  for (const [t, s] of [['soldier', 1], ['tank', 5], ['jet', 3]]) {
     assert.equal(UNITS[t].strength, s)
     assert.match(sql, new RegExp(`when '${t}' then ${s}`))
   }
@@ -42,12 +44,12 @@ test('combat RNG band + retreat fraction match 026 tick', () => {
   assert.match(sql, /\* 0\.25/) // attacker retreat keeps 25%
 })
 
-test('unit strengths match war_stack_strength() in 026', () => {
+test('soldier/tank/jet stack strengths match war_stack_strength() in 026', () => {
   const sql = mig('026_war_combat_v2.sql')
   assert.match(sql, /'soldier'\)::numeric,0\)\*1/)
   assert.match(sql, /'tank'\)::numeric,0\)\*5/)
   assert.match(sql, /'jet'\)::numeric,0\)\*3/)
-  assert.match(sql, /'warship'\)::numeric,0\)\*2/)
+  // warship strength was raised to 20 in migration 036 (see the OP-warship test below).
 })
 
 test('province income 10/hr matches 027', () => {
@@ -60,10 +62,10 @@ test('START_ARMY soldiers match war_spawn() in 028', () => {
   assert.match(mig('028_war_spawn.sql'), /true, 500, 0, 0, 0/)
 })
 
-// 027 is the LIVE war_tick() (last create-or-replace in apply order). Guard the live
-// copy directly so drift in 026/027 — not just the superseded 023 — is caught.
-test('live tick (027) carries the combat + income constants', () => {
-  const sql = mig('027_war_income_territory.sql')
+// 036 is the LIVE war_tick() (last create-or-replace in apply order: 023→026→027→034→036).
+// Guard the live copy directly so drift in the actually-running tick is caught.
+test('live tick (036) carries the combat + income constants', () => {
+  const sql = mig('036_war_ports_and_warship.sql')
   assert.match(sql, /banklv\*50/)                    // bank income 50/level/hr
   assert.match(sql, /provinces\*10/)                 // per-province 10/hr
   assert.match(sql, /0\.8 \* def_raw \* 5/)          // loot
@@ -73,6 +75,15 @@ test('live tick (027) carries the combat + income constants', () => {
   assert.match(sql, /1 \+ 0\.1 \* atk_lab/)          // lab +0.1/level
   assert.match(sql, /\* 1\.5/)                       // offline dug-in
   assert.match(sql, /least\(0\.75, 0\.25 \* def_aa\)/) // anti-air min(0.75, 0.25/level)
+})
+
+test('OP warship strength (20) + port requirement match the live SQL in 036', () => {
+  const sql = mig('036_war_ports_and_warship.sql')
+  assert.equal(UNITS.warship.strength, 20)            // raised from 2 → "really OP"
+  assert.equal(UNITS.warship.requiresPort, true)      // can only be built once you own a port
+  assert.match(sql, /'warship'\)::numeric,0\)\*20/)   // attacker stack strength (war_stack_strength)
+  assert.match(sql, /dest\.warship \* 20/)            // defender formula in the live tick
+  assert.match(sql, /'bunker','antiair','factory','lab','bank','port'/) // port allowed by the type check
 })
 
 test('building multipliers match the SQL literals', () => {

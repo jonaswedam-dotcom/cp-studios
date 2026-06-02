@@ -16,6 +16,7 @@ const G = {
     COAST_FAR:     { centroid: [2, 0],    coastal: true,  neighbors: [] },                // ~222km, sea + air
     ENEMY_FAR_OOR: { centroid: [80, 0],   coastal: false, neighbors: [] },                // ~8900km, out of range
     NEUTRAL_FAR_AIR:{ centroid: [3, 0.1], coastal: false, neighbors: [] },                // ~333km, unclaimed, air only
+    NEUTRAL_COAST: { centroid: [1.5, 0],  coastal: true,  neighbors: [] },                // ~167km, unclaimed, coastal → sea
   },
 }
 
@@ -57,9 +58,23 @@ test('computeTargets excludes targets out of every range', () => {
   assert.equal(k.ENEMY_FAR_OOR, undefined)
 })
 
-test('computeTargets does NOT badge distant unclaimed neutrals (air/sea), only claimed', () => {
+test('computeTargets does NOT badge air-only (non-coastal) distant neutrals', () => {
+  // Jets can reach it, but distant inland neutrals stay un-badged to keep the map readable;
+  // they remain clickable via sourcesForDest. (Coastal neutrals ARE badged — see below.)
   const k = kindOf(computeTargets(REGIONS, G, OPTS))
   assert.equal(k.NEUTRAL_FAR_AIR, undefined)
+})
+
+test('computeTargets badges an in-range coastal neutral when I have a coastal warship (no more land-locked fleet)', () => {
+  const k = kindOf(computeTargets(REGIONS, G, OPTS))
+  assert.equal(k.NEUTRAL_COAST, 'expand') // a fleet always has somewhere to sail
+})
+
+test('computeTargets does NOT badge coastal neutrals when I have no coastal warship', () => {
+  // Strip ME1's warships (and ME2 has none) → the sea-expansion badge must disappear.
+  const noShips = { ...REGIONS, ME1: { ...REGIONS.ME1, warship: 0 } }
+  const k = kindOf(computeTargets(noShips, G, OPTS))
+  assert.equal(k.NEUTRAL_COAST, undefined)
 })
 
 test('computeTargets drops shielded enemies', () => {

@@ -1,6 +1,6 @@
 import { BUILDINGS, BUILDING_TYPES, SLOTS_PER_REGION, buildingCost } from './buildings.js'
 
-export default function BuildingsModal({ regionName, regionBuildings, balance, onBuild, onUpgrade, onClose, loading, canReinforce, onReinforce }) {
+export default function BuildingsModal({ regionName, regionBuildings, regionCoastal = false, balance, onBuild, onUpgrade, onClose, loading, canReinforce, onReinforce }) {
   const used = regionBuildings.length
   const slotsLeft = SLOTS_PER_REGION - used
 
@@ -23,16 +23,17 @@ export default function BuildingsModal({ regionName, regionBuildings, balance, o
         {/* Existing buildings (upgradeable) */}
         {regionBuildings.map((b) => {
           const next = buildingCost(b.type, b.level)
+          const maxed = next === Infinity // 3-tier building at Lv3, or a single-tier port
           return (
             <div key={b.id} className="flex items-center gap-3 bg-cp-elevated border border-cp-border rounded-xl px-3 py-2.5">
               <div className="flex-1">
                 <p className="text-sm text-cp-text">{BUILDINGS[b.type].label} <span className="text-cp-muted">Lv {b.level}</span></p>
                 <p className="text-[11px] text-cp-muted">{BUILDINGS[b.type].desc}</p>
               </div>
-              <button disabled={loading || b.level >= 3 || (balance ?? 0) < next}
+              <button disabled={loading || maxed || (balance ?? 0) < next}
                 onClick={() => onUpgrade(b)}
                 className="px-3 py-1.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-400 text-xs font-semibold disabled:opacity-30">
-                {b.level >= 3 ? 'Max' : `Upgrade · ${next.toLocaleString()}`}
+                {maxed ? 'Max' : `Upgrade · ${next.toLocaleString()}`}
               </button>
             </div>
           )
@@ -42,7 +43,7 @@ export default function BuildingsModal({ regionName, regionBuildings, balance, o
         {slotsLeft > 0 && (
           <div className="grid grid-cols-1 gap-2 pt-1">
             <p className="text-xs text-cp-muted uppercase tracking-wider">Build new</p>
-            {BUILDING_TYPES.filter((t) => !regionBuildings.some((b) => b.type === t)).map((t) => {
+            {BUILDING_TYPES.filter((t) => !regionBuildings.some((b) => b.type === t) && (!BUILDINGS[t].coastal || regionCoastal)).map((t) => {
               const cost = buildingCost(t, 0)
               return (
                 <button key={t} disabled={loading || (balance ?? 0) < cost} onClick={() => onBuild(t)}

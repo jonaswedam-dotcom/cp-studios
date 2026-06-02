@@ -3,13 +3,14 @@ import { UNITS, UNIT_TYPES } from './units.js'
 import { troopCost, maxAffordable } from './economy.js'
 import { UnitIcon } from './icons.jsx'
 
-export default function BuyUnitsModal({ balance, costMult = 1, armyMult = 1, onConfirm, onClose, loading }) {
+export default function BuyUnitsModal({ balance, costMult = 1, armyMult = 1, hasPort = false, onConfirm, onClose, loading }) {
   const [type, setType]   = useState('soldier')
   const [count, setCount] = useState('')
+  const locked = (t) => !!UNITS[t].requiresPort && !hasPort // warships need a Port
   const max   = maxAffordable(type, balance, costMult, armyMult)
   const n     = parseInt(count) || 0
   const cost  = troopCost(type, n, costMult, armyMult)
-  const valid = n >= 1 && n <= max
+  const valid = n >= 1 && n <= max && !locked(type)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -18,16 +19,20 @@ export default function BuyUnitsModal({ balance, costMult = 1, armyMult = 1, onC
         <h3 className="font-display text-lg text-cp-text">Buy Units</h3>
 
         <div className="grid grid-cols-4 gap-2">
-          {UNIT_TYPES.map((t) => (
-            <button key={t} onClick={() => { setType(t); setCount('') }}
-              className={`flex flex-col items-center gap-1 py-2.5 rounded-xl border text-xs transition-colors ${
-                type === t ? 'border-red-500/60 bg-red-500/10 text-cp-text' : 'border-cp-border text-cp-muted hover:text-cp-text'
-              }`}>
-              <UnitIcon type={t} className="w-5 h-5" />
-              <span>{UNITS[t].label}</span>
-              <span className="text-amber-400/80">{Math.round(UNITS[t].cost * costMult)}</span>
-            </button>
-          ))}
+          {UNIT_TYPES.map((t) => {
+            const isLocked = locked(t)
+            return (
+              <button key={t} disabled={isLocked} onClick={() => { if (isLocked) return; setType(t); setCount('') }}
+                title={isLocked ? 'Build a Port first — warships deploy there' : undefined}
+                className={`flex flex-col items-center gap-1 py-2.5 rounded-xl border text-xs transition-colors ${
+                  type === t ? 'border-red-500/60 bg-red-500/10 text-cp-text' : 'border-cp-border text-cp-muted hover:text-cp-text'
+                } ${isLocked ? 'opacity-40 cursor-not-allowed' : ''}`}>
+                <UnitIcon type={t} className="w-5 h-5" />
+                <span>{UNITS[t].label}</span>
+                <span className="text-amber-400/80">{isLocked ? '🔒 Port' : Math.round(UNITS[t].cost * costMult)}</span>
+              </button>
+            )
+          })}
         </div>
 
         <div>

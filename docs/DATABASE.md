@@ -272,14 +272,15 @@ Structures placed on a province (max 3 slots per province). Defence buildings (`
 | `id`         | uuid PK     | default `gen_random_uuid()`                                        |
 | `region_id`  | text        | FK → `war_regions(region_id)` (`on delete cascade`)                |
 | `owner_id`   | uuid        | FK → `auth.users` (`on delete set null`)                           |
-| `type`       | text        | `bunker` \| `antiair` \| `factory` \| `lab` \| `bank`              |
-| `level`      | integer     | `1`–`3` (check constraint); cost rises per level                   |
+| `type`       | text        | `bunker` \| `antiair` \| `factory` \| `lab` \| `bank` \| `port` (`port` added in `036`) |
+| `level`      | integer     | `1`–`3` (check constraint); cost rises per level (`port` is single-tier) |
 | `created_at` | timestamptz | default `now()`                                                    |
 
 Effects (mirrored in `src/war/buildings.js`): **bunker** +50%/level defender strength;
 **antiair** removes 25%/level of incoming jet strength (cap 75%); **factory** −10%/level troop
 cost (floor 40%); **lab** +10%/level troop strength; **bank** passive income (50 coins/level/hr,
-paid by the Phase 3 server tick). RLS: `insert`/`update`/`delete` are **owner-only** as of
+paid by the Phase 3 server tick); **port** (migration `036`, coastal-only, single-tier) unlocks
+warships — you must own a port to build them and they deploy to it. RLS: `insert`/`update`/`delete` are **owner-only** as of
 migration `024` (Phases 2 used broad-authenticated write while the client resolved capture).
 Enable Realtime for `war_buildings`.
 
@@ -354,10 +355,29 @@ to match by `src/war/parity.test.js`:
 | Bank income rate        | 50/level/hr| `023`–`027`   | `buildings.js`         |
 | Vault cap multiplier    | 10h        | `023`–`027`   | `buildings.js`         |
 | Warship land capacity   | 20         | `026`/`027`   | `units.js`             |
+| Warship strength        | 20         | `036`         | `units.js`             |
 | Tank cost (client-only) | 400        | —             | `units.js`             |
 
 `src/war/parity.test.js` parses the migration SQL and asserts these values match the JS
 constants. Run `node --test src/war/*.test.js` to verify after changing either side.
+
+### CP War — Ports & OP warships (migration `036`)
+
+Supersedes the `034` definition of `war_tick()`. Three changes, all about warships:
+
+1. **New `port` building type** — the `war_buildings.type` CHECK is widened to include `port`.
+   Ports are **coastal-only** and **single-tier** (these two rules are client-enforced in
+   `BuildingsModal`/`WarPage` — same trust model as unit purchases, CLAUDE.md §4; the DB only
+   gains the new allowed value).
+2. **Warships now require a port** — clients only let you buy warships if you own a port, and
+   they deploy onto the port province (not the HQ). This fixes the "land-locked warship" bug:
+   a port is coastal by definition, so a warship is never born on a tile it can't sail from.
+3. **Warship strength 2 → 20** ("really OP, because they cost a lot" — client cost also rose
+   600 → 4000). The coefficient is updated in BOTH `war_stack_strength()` (attacking stacks)
+   and the tick's `def_raw` defender formula, kept in sync with `units.js` by `parity.test.js`.
+
+`parity.test.js` now guards `036` as the **live** `war_tick()` (the chain is
+`023→026→027→034→036`); it previously pointed at the superseded `027`.
 
 ### Direct messages (migration `018`)
 

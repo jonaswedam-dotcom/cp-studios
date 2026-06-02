@@ -13,7 +13,7 @@ import { UNITS, UNIT_TYPES, formatDuration } from '../war/units.js'
 import { describeEvent } from '../war/events.js'
 import { troopCost, armySizeMultiplier } from '../war/economy.js'
 import { emptyStack } from '../war/combat.js'
-import { costMultiplier, strengthMultiplier, buildingCost, SLOTS_PER_REGION } from '../war/buildings.js'
+import { BUILDINGS, costMultiplier, strengthMultiplier, buildingCost, SLOTS_PER_REGION } from '../war/buildings.js'
 import { validateMove } from '../war/movement.js'
 import { computeTargets, sourcesForDest } from '../war/targeting.js'
 import { pickRandomSpawn } from '../war/spawn.js'
@@ -66,6 +66,7 @@ function WarGame() {
   const eliminated = me && myRegionRows.length === 0
 
   const myBuildings    = buildings.filter((b) => b.owner_id === userId)
+  const hasPort        = myBuildings.some((b) => b.type === 'port')
   const buildingsIn    = (regionId) => buildings.filter((b) => b.region_id === regionId)
   const myCostMult     = costMultiplier(myBuildings)
   const myStrengthMult = strengthMultiplier(myBuildings)
@@ -123,6 +124,20 @@ function WarGame() {
     try {
       const cost = troopCost(type, count, myCostMult, myArmyMult)
       if ((balance ?? 0) < cost) { showFlash('Not enough coins.'); return }
+
+      // Port-gated units (warships) deploy to a Port you own — never a land-locked HQ.
+      if (UNITS[type].requiresPort) {
+        const portRow = myRegionRows.find((r) => myBuildings.some((b) => b.region_id === r.region_id && b.type === 'port'))
+        if (!portRow) { showFlash('Build a Port first — warships launch from your port.'); return }
+        const { error: pErr } = await supabase.from('war_regions')
+          .update({ [type]: (portRow[type] || 0) + count, updated_at: new Date().toISOString() })
+          .eq('region_id', portRow.region_id)
+        if (pErr) { showFlash('Purchase failed.'); return }
+        await adjustBalance(-cost)
+        showFlash(`+${count} ${UNITS[type].label}${count > 1 ? 's' : ''} at ${graph.regions[portRow.region_id]?.city || portRow.region_id}`)
+        return
+      }
+
       let target = myRegionRows.find((r) => r.is_hq) || myRegionRows[0]
       if (!target) {
         const claimed = new Set(Object.keys(regions))
@@ -145,7 +160,7 @@ function WarGame() {
       await adjustBalance(-cost)
       showFlash(`+${count} ${UNITS[type].label}${count > 1 ? 's' : ''}`)
     } finally { setShowBuy(false); setBusy(false) }
-  }, [busy, me, balance, myRegionRows, regions, graph, userId, adjustBalance, myCostMult, myArmyMult])
+  }, [busy, me, balance, myRegionRows, myBuildings, regions, graph, userId, adjustBalance, myCostMult, myArmyMult])
 
   // ── Send a movement ─────────────────────────────────────────────────────────
   const handleMove = useCallback(async ({ from, dest, stack }) => {
@@ -198,15 +213,16 @@ function WarGame() {
     setBusy(true)
     try {
       if (regions[buildFor]?.owner_id !== userId) { showFlash('You no longer own this province.'); return }
+      if (BUILDINGS[type]?.coastal && !graph.regions[buildFor]?.coastal) { showFlash('Ports can only be built on coastal territory.'); return }
       const cost = buildingCost(type, 0)
       if ((balance ?? 0) < cost) { showFlash('Not enough coins.'); return }
       if (buildingsIn(buildFor).length >= SLOTS_PER_REGION) { showFlash('No slots left.'); return }
       const { error } = await supabase.from('war_buildings').insert({ region_id: buildFor, owner_id: userId, type, level: 1 })
       if (error) { showFlash('Build failed.'); return }
       await adjustBalance(-cost)
-      showFlash(`Built ${type}.`)
+      showFlash(`Built ${BUILDINGS[type]?.label || type}.`)
     } finally { setBusy(false) }
-  }, [busy, buildFor, balance, buildings, regions, userId, adjustBalance])
+  }, [busy, buildFor, balance, buildings, regions, graph, userId, adjustBalance])
 
   const handleUpgrade = useCallback(async (b) => {
     if (busy) return
@@ -214,7 +230,7 @@ function WarGame() {
     try {
       if (b.owner_id !== userId || regions[buildFor]?.owner_id !== userId) { showFlash('You no longer own this building.'); return }
       const cost = buildingCost(b.type, b.level)
-      if (b.level >= 3) { showFlash('Already max level.'); return }
+      if (cost === Infinity) { showFlash('Already max level.'); return }
       if ((balance ?? 0) < cost) { showFlash('Not enough coins.'); return }
       const { error } = await supabase.from('war_buildings').update({ level: b.level + 1 }).eq('id', b.id)
       if (error) { showFlash('Upgrade failed.'); return }
@@ -295,11 +311,11 @@ function WarGame() {
 
   return (
     <div className="flex flex-col lg:flex-row h-[calc(100vh-64px)] overflow-hidden bg-[#0a0a0a]">
-      {showBuy && <BuyUnitsModal balance={balance} costMult={myCostMult} armyMult={myArmyMult} loading={busy} onConfirm={handleBuy} onClose={() => setShowBuy(false)} />}
+      {showBuy && <BuyUnitsModal balance={balance} costMult={myCostMult} armyMult={myArmyMult} hasPort={hasPort} loading={busy} onConfirm={handleBuy} onClose={() => setShowBuy(false)} />}
       {sendTo && <MoveUnitsModal graph={graph} regions={regions} dest={sendTo} sources={sendSources} loading={busy} onConfirm={handleMove} onClose={() => { setSendTo(null); setSendSources([]) }} />}
       {buildFor && (
         <BuildingsModal regionName={graph.regions[buildFor]?.city || buildFor}
-          regionBuildings={buildingsIn(buildFor)} balance={balance} loading={busy}
+          regionBuildings={buildingsIn(buildFor)} regionCoastal={!!graph.regions[buildFor]?.coastal} balance={balance} loading={busy}
           canReinforce={reinforceSources(buildFor).length > 0}
           onReinforce={() => { const s = reinforceSources(buildFor); setBuildFor(null); setSendTo(buildFor); setSendSources(s) }}
           onBuild={handleBuild} onUpgrade={handleUpgrade} onClose={() => setBuildFor(null)} />
