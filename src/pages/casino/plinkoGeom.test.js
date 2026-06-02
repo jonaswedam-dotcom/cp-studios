@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { CW, makeGeom, buildPath, segPos } from './plinkoGeom.js'
+import { CW, makeGeom, buildPath, segPos, MULTIPLIERS, decisionsToSlot, resolvePlinko } from './plinkoGeom.js'
 
 const ROWS = [8, 12, 16]
 
@@ -112,4 +112,50 @@ test('segPos: exact endpoints; bounce=0 is gravity (t^2) with cubic ease-out x',
   assert.deepEqual(segPos(a, b, 1, 0), { x: 140, y: 90 })
   // at t=0.5: ex = 1-(0.5)^3 = 0.875 -> x = 100 + 40*0.875 = 135; y = 50 + 40*0.5^2 = 60
   assert.deepEqual(segPos(a, b, 0.5, 0), { x: 135, y: 60 })
+})
+
+test('MULTIPLIERS table has rows+1 entries for every rows/risk combo', () => {
+  for (const rows of ROWS) {
+    for (const risk of ['low', 'medium', 'high']) {
+      assert.equal(MULTIPLIERS[rows][risk].length, rows + 1, `${rows}/${risk}`)
+    }
+  }
+})
+
+test('decisionsToSlot is the count of right deflections and matches buildPath', () => {
+  for (const rows of ROWS) {
+    const g = makeGeom(rows)
+    const rng = lcg(555 + rows)
+    for (let t = 0; t < 300; t++) {
+      const dec = Array.from({ length: rows }, () => (rng() < 0.5 ? 1 : 0))
+      const slot = decisionsToSlot(dec)
+      assert.equal(slot, dec.reduce((s, d) => s + d, 0))
+      assert.equal(slot, buildPath(rows, dec, g).slot)
+    }
+  }
+})
+
+test('resolvePlinko: all-left and all-right hit the edge slots', () => {
+  // rng()=0 -> floor(0*2)=0 (left) every row -> slot 0; the edge multiplier.
+  const left = resolvePlinko({ bet: 100, rows: 8, risk: 'high', rng: () => 0 })
+  assert.deepEqual(left.decisions, Array(8).fill(0))
+  assert.equal(left.slot, 0)
+  assert.equal(left.mult, MULTIPLIERS[8].high[0])         // 29
+  assert.equal(left.delta, Math.floor(100 * 29) - 100)    // 2800
+  // rng()=0.99 -> floor(0.99*2)=1 (right) every row -> slot = rows.
+  const right = resolvePlinko({ bet: 100, rows: 8, risk: 'high', rng: () => 0.99 })
+  assert.deepEqual(right.decisions, Array(8).fill(1))
+  assert.equal(right.slot, 8)
+  assert.equal(right.mult, MULTIPLIERS[8].high[8])        // 29
+})
+
+test('resolvePlinko: delta = floor(bet*mult) - bet (loss when mult < 1)', () => {
+  // a center-ish slot with a sub-1 multiplier produces a negative delta.
+  // 12-row medium center slot (index 6) = 0.3.
+  const dec = [1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0] // 6 rights -> slot 6
+  let i = 0
+  const r = resolvePlinko({ bet: 100, rows: 12, risk: 'medium', rng: () => (dec[i++] ? 0.99 : 0) })
+  assert.equal(r.slot, 6)
+  assert.equal(r.mult, MULTIPLIERS[12].medium[6])         // 0.3
+  assert.equal(r.delta, Math.floor(100 * 0.3) - 100)      // -70
 })

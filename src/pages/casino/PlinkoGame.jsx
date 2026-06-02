@@ -214,7 +214,7 @@ function drawScene(canvas, mults, geom, balls, litSlots, pegHits, now) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function PlinkoGame() {
-  const { balance, placeBet, adjustBalance } = useCasino()
+  const { balance, play } = useCasino()
 
   const [bet,           setBet]           = useState(50)
   const [rows,          setRows]          = useState(8)
@@ -223,6 +223,7 @@ export default function PlinkoGame() {
   const [recentResults, setRecentResults] = useState([])
   const [ballsActive,   setBallsActive]   = useState(false)
   const [inFlight,      setInFlight]      = useState(0)   // reactive mirror of inFlightRef
+  const [error,         setError]         = useState(null)
 
   const canvasRef       = useRef(null)
   const rafRef          = useRef(null)
@@ -232,10 +233,8 @@ export default function PlinkoGame() {
   const litSlotsRef     = useRef({})        // { slotIdx: landingTimestamp }
   const pegHitsRef      = useRef({})        // { "x_y": strikeTimestamp } for strike pops
   const ballIdRef       = useRef(0)
-  const inFlightRef     = useRef(0)         // sum of bet amounts currently animating
+  const inFlightRef     = useRef(0)         // sum of bet amounts awaiting their RPC result
   const balanceRef      = useRef(balance)
-  const adjustBalanceRef = useRef(adjustBalance)
-  adjustBalanceRef.current = adjustBalance
   const betRef       = useRef(bet)
   const geomRef      = useRef(makeGeom(8))
   const multsRef     = useRef(MULT_TABLE[8]['medium'])
@@ -315,19 +314,17 @@ export default function PlinkoGame() {
       const hits = pegHitsRef.current
       for (const k in hits) if (ts - hits[k] > 300) delete hits[k]
 
-      // Remove landed balls and settle bets
+      // Remove landed balls and record their result pill. The wallet was already
+      // settled server-side when the play_plinko RPC resolved at drop time, so
+      // landing only updates the recent-results display.
       if (finished.length > 0) {
         ballsRef.current = ballsRef.current.filter(b => !b.done)
         loopUntilRef.current = ts + FLASH_MS  // extend loop to show slot fade
 
         finished.forEach(ball => {
-          inFlightRef.current = Math.max(0, inFlightRef.current - ball.bet)
-          setInFlight(inFlightRef.current)
-          placeBet('plinko', ball.bet, ball.winAmount).then(() => {
-            setRecentResults(prev => {
-              const next = [{ mult: ball.mult, winAmount: ball.winAmount }, ...prev]
-              return next.slice(0, 10)
-            })
+          setRecentResults(prev => {
+            const next = [{ mult: ball.mult, winAmount: ball.winAmount }, ...prev]
+            return next.slice(0, 10)
           })
         })
 
@@ -344,34 +341,55 @@ export default function PlinkoGame() {
     }
 
     rafRef.current = requestAnimationFrame(frame)
-  }, [placeBet])
+  }, [])
 
   // ── Drop one ball ─────────────────────────────────────────────────────────
-  const drop = useCallback(() => {
+  // Outcome (path decisions, slot, payout) comes from the server. We reserve the
+  // bet against the live balance via inFlightRef while the RPC is pending, then
+  // build the animation from the server's o.decisions and release the reservation
+  // (the wallet was settled server-side when the RPC resolved). Fail-closed.
+  const drop = useCallback(async () => {
     const bal  = balanceRef.current
     const b    = betRef.current
     const r    = rowsRef.current
     const risk = riskRef.current
 
-    // Guard: don't over-bet (account for coins already in-flight)
+    // Guard: don't over-bet (account for coins already reserved by pending drops)
     const available = (bal ?? 0) - inFlightRef.current
     if (bal === null || b < 1 || b > available) return
+
+    setError(null)
+    // Reserve the bet so concurrent/auto drops can't over-commit before the RPC settles.
+    inFlightRef.current += b
+    setInFlight(inFlightRef.current)
+
+    let o
+    try {
+      o = await play('plinko', { p_bet: b, p_rows: r, p_risk: risk })
+    } catch (e) {
+      console.error('[PlinkoGame] play error:', e)
+      inFlightRef.current = Math.max(0, inFlightRef.current - b)
+      setInFlight(inFlightRef.current)
+      setError('Drop failed — try again.')
+      if (ballsRef.current.length === 0) setBallsActive(false)
+      return
+    }
+
+    // Release the reservation: the server has already applied the net delta.
+    inFlightRef.current = Math.max(0, inFlightRef.current - b)
+    setInFlight(inFlightRef.current)
 
     const g     = makeGeom(r)
     const mults = MULT_TABLE[r][risk]
 
-    const decisions     = Array.from({ length: r }, () => +(Math.random() < 0.5))
+    const decisions     = o.decisions
     const { pts, slot } = buildPath(r, decisions, g)
-    const mult          = mults[slot]
-    const payout        = Math.floor(b * mult)
-    const winAmount     = payout - b
+    const mult          = o.mult
+    const winAmount     = o.delta
     const msPerSeg      = r <= 8 ? 240 : r <= 12 ? 215 : 190
 
     const id    = ballIdRef.current++
     const color = BALL_COLORS[id % BALL_COLORS.length]
-
-    inFlightRef.current += b
-    setInFlight(inFlightRef.current)
 
     ballsRef.current.push({
       id, pts, slot, mult, winAmount, bet: b, color, msPerSeg,
@@ -397,7 +415,7 @@ export default function PlinkoGame() {
 
     setBallsActive(true)
     startLoop()
-  }, [startLoop])
+  }, [startLoop, play])
 
   // ── Auto bet toggle ───────────────────────────────────────────────────────
   const toggleAuto = useCallback(() => {
@@ -432,12 +450,13 @@ export default function PlinkoGame() {
     }
   }, [balance, bet, autoActive])
 
-  // Cleanup on unmount: cancel animation + forfeit any bets still in flight.
-  // Without this, navigating away mid-game is a free play (same exploit as Blackjack).
+  // Cleanup on unmount: cancel the animation + auto loop. No forfeit is needed —
+  // each drop's wallet delta is applied server-side the moment its play_plinko RPC
+  // resolves (which happens before the ball is even pushed into the animation), so
+  // navigating away mid-flight cannot be a free play.
   useEffect(() => () => {
     if (rafRef.current)  cancelAnimationFrame(rafRef.current)
     if (autoRef.current) clearInterval(autoRef.current)
-    if (inFlightRef.current > 0) adjustBalanceRef.current(-inFlightRef.current)
   }, [])
 
   const availableBalance = (balance ?? 0) - inFlight
@@ -538,6 +557,12 @@ export default function PlinkoGame() {
               style={{ borderRadius: 16, display: 'block' }}
             />
           </div>
+
+          {error && (
+            <div className="text-center rounded-xl border border-red-400/30 bg-red-400/10 py-2 px-4 text-sm text-red-400">
+              {error}
+            </div>
+          )}
 
           {/* Recent results pills */}
           {recentResults.length > 0 && (

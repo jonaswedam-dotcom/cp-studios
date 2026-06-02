@@ -3,7 +3,7 @@ import { GameLayout, BetChips, ResultBanner } from './shared'
 import { useCasino } from '../../context/CasinoContext'
 import {
   SYMBOLS, PAYTABLE, REELS, ROWS,
-  drawSymbol, spinGrid, evaluateGrid, netForBet,
+  drawSymbol, evaluateGrid,
 } from './slotsEngine'
 
 // Per-column stop times (ms), left → right.
@@ -62,7 +62,7 @@ function Cell({ symbolIdx, spinning, highlight }) {
 }
 
 export default function SlotsGame() {
-  const { balance, placeBet } = useCasino()
+  const { balance, play } = useCasino()
 
   const [grid, setGrid] = useState(initialGrid)
   const [spinningCols, setSpinningCols] = useState(Array(REELS).fill(false))
@@ -72,6 +72,7 @@ export default function SlotsGame() {
   const [resultAmount, setResultAmount] = useState(0)
   const [resultLabel, setResultLabel] = useState('')
   const [winCells, setWinCells] = useState(() => new Set())
+  const [error, setError] = useState(null)
 
   const intervalRefs = useRef(Array(REELS).fill(null))
   const timeoutRefs = useRef([])
@@ -94,9 +95,11 @@ export default function SlotsGame() {
     timeoutRefs.current.forEach((id) => clearTimeout(id))
   }, [])
 
-  function resolveSpin(finalGrid) {
+  // Resolves against the SERVER's grid + net. The grid is re-evaluated locally
+  // only to highlight winning cells and build the label — the payout (o.net) is
+  // authoritative and never recomputed for money.
+  function resolveSpin(finalGrid, serverNet) {
     const { totalReturn, lines } = evaluateGrid(finalGrid)
-    const net = netForBet(totalReturn, bet)
     const result = totalReturn === 0 ? 'loss' : totalReturn === 1 ? 'push' : 'win'
 
     const cells = new Set()
@@ -104,13 +107,12 @@ export default function SlotsGame() {
     setWinCells(cells)
 
     setGameResult(result)
-    setResultAmount(result === 'loss' ? bet : net)
+    setResultAmount(result === 'loss' ? bet : serverNet)
     setResultLabel(describe(lines, totalReturn))
     setPhase('result')
-    placeBet('slots', bet, net)
   }
 
-  function handleSpin() {
+  async function handleSpin() {
     if (phase === 'spinning') return
 
     setPhase('spinning')
@@ -118,9 +120,21 @@ export default function SlotsGame() {
     setResultAmount(0)
     setResultLabel('')
     setWinCells(new Set())
+    setError(null)
     timeoutRefs.current = [] // prior spin's timeouts have all fired by now
 
-    const finalGrid = spinGrid()
+    // Grid + payout come from the server; the reels animate toward o.grid. Fail-closed.
+    let o
+    try {
+      o = await play('slots', { p_bet: bet })
+    } catch (e) {
+      console.error('[SlotsGame] play error:', e)
+      setError('Spin failed — try again.')
+      setPhase('idle')
+      return
+    }
+
+    const finalGrid = o.grid
     setSpinningCols(Array(REELS).fill(true))
 
     // Each column cycles its 3 cells with random symbols.
@@ -150,7 +164,7 @@ export default function SlotsGame() {
           return next
         })
         if (col === REELS - 1) {
-          const t2 = setTimeout(() => resolveSpin(finalGrid), 250)
+          const t2 = setTimeout(() => resolveSpin(finalGrid, o.net), 250)
           timeoutRefs.current.push(t2)
         }
       }, stopTime)
@@ -259,6 +273,13 @@ export default function SlotsGame() {
           >
             Spin Again
           </button>
+        )}
+
+        {/* ── Error ── */}
+        {error && (
+          <div className="w-full max-w-xl text-center rounded-xl border border-red-400/30 bg-red-400/10 py-2.5 px-4 text-sm text-red-400">
+            {error}
+          </div>
         )}
 
         {/* ── Result banner ── */}

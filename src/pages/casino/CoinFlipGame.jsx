@@ -3,7 +3,7 @@ import { GameLayout, BetChips, ResultBanner, formatCoins } from './shared'
 import { useCasino } from '../../context/CasinoContext'
 
 export default function CoinFlipGame() {
-  const { balance, placeBet } = useCasino()
+  const { balance, play } = useCasino()
 
   const [choice, setChoice]         = useState(null)   // 'heads' | 'tails' | null
   const [phase, setPhase]           = useState('idle') // 'idle' | 'flipping' | 'result'
@@ -12,6 +12,7 @@ export default function CoinFlipGame() {
   const [gameResult, setGameResult] = useState(null)   // 'win' | 'loss' | null
   const [wonAmount, setWonAmount]   = useState(0)
   const [displayFace, setDisplayFace] = useState('H') // shown on coin during / after flip
+  const [error, setError]           = useState(null)
 
   // Inject keyframe animation once
   useEffect(() => {
@@ -33,29 +34,36 @@ export default function CoinFlipGame() {
     }
   }, [])
 
-  function handleFlip() {
+  async function handleFlip() {
     if (!choice || !bet || phase === 'flipping') return
 
     setPhase('flipping')
     setResult(null)
     setGameResult(null)
     setWonAmount(0)
+    setError(null)
+
+    // Outcome comes from the server; animate the coin toward it. Fail-closed.
+    let o
+    try {
+      o = await play('coinflip', { p_bet: bet, p_choice: choice })
+    } catch (e) {
+      console.error('[CoinFlipGame] play error:', e)
+      setError('Flip failed — try again.')
+      setPhase('idle')
+      return
+    }
 
     setTimeout(() => {
-      const flipped = Math.random() > 0.5 ? 'heads' : 'tails'
-      const won = flipped === choice
+      const flipped = o.result
+      const won = o.win
 
       setResult(flipped)
       setDisplayFace(flipped === 'heads' ? 'H' : 'T')
       setPhase('result')
 
-      // House edge: a fair 50/50 paying 2x has 0% edge. Pay 1.95x (0.95x net profit)
-      // so the house keeps ~2.5% — in line with roulette's even-money bets.
-      const winAmount = won ? Math.floor(bet * 0.95) : -bet
       setGameResult(won ? 'win' : 'loss')
       setWonAmount(won ? Math.floor(bet * 0.95) : bet)
-
-      placeBet('coin-flip', bet, winAmount)
     }, 1100)
   }
 
@@ -64,6 +72,7 @@ export default function CoinFlipGame() {
     setResult(null)
     setGameResult(null)
     setWonAmount(0)
+    setError(null)
     // keep choice so user doesn't have to re-select
   }
 
@@ -194,6 +203,13 @@ export default function CoinFlipGame() {
           >
             Flip Again
           </button>
+        )}
+
+        {/* ── Error ── */}
+        {error && (
+          <div className="w-full max-w-sm text-center rounded-xl border border-red-400/30 bg-red-400/10 py-2.5 px-4 text-sm text-red-400">
+            {error}
+          </div>
         )}
 
         {/* ── Result banner ── */}

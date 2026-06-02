@@ -1,53 +1,18 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { GameLayout, BetChips, ResultBanner, formatCoins } from './shared'
 import { useCasino } from '../../context/CasinoContext'
+import { cardValue, handValue, isBlackjack } from './blackjackEngine'
 
-// ── Card helpers ──────────────────────────────────────────────────────────────
-const SUITS = ['♠', '♣', '♥', '♦']
-const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K']
-
-function buildDeck() {
-  const deck = []
-  for (const suit of SUITS) {
-    for (const rank of RANKS) {
-      deck.push({ suit, rank })
-    }
-  }
-  return deck
-}
-
-function shuffle(deck) {
-  const d = [...deck]
-  for (let i = d.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[d[i], d[j]] = [d[j], d[i]]
-  }
-  return d
-}
-
-function cardValue(rank) {
-  if (['J', 'Q', 'K'].includes(rank)) return 10
-  if (rank === 'A') return 11
-  return parseInt(rank, 10)
-}
-
-function handValue(hand) {
-  let total = 0
-  let aces = 0
-  for (const card of hand) {
-    total += cardValue(card.rank)
-    if (card.rank === 'A') aces++
-  }
-  while (total > 21 && aces > 0) {
-    total -= 10
-    aces--
-  }
-  return total
-}
-
-function isBlackjack(hand) {
-  return hand.length === 2 && handValue(hand) === 21
-}
+// ── Server response contract (matches supabase/migrations/043_casino_blackjack.sql) ──
+// All four RPCs (blackjack_open/hit/double/stand) return the public round state.
+// A Card is { suit, rank }. The terminal flag is `done` (boolean).
+//   • Mid-round (done:false): blackjack_open sends `dealer_up` (the single up-card,
+//     hole card never sent); blackjack_hit sends just `player` + `player_value`.
+//   • Terminal (done:true): sends the full `dealer` array + `result`
+//     ('win' | 'loss' | 'push') + `payout` (gross credited) + `balance`.
+//     A player bust (hit) is terminal but sends no `dealer` (dealer never played).
+// cardValue/handValue/isBlackjack are reused from the tested engine for DISPLAY only
+// (scores) — never to decide money.
 
 // ── Card component ────────────────────────────────────────────────────────────
 function Card({ card, faceDown = false, animIndex = 0 }) {
@@ -175,39 +140,34 @@ function Hand({ hand, hideSecond = false, label, score, hideScore = false }) {
   )
 }
 
+// Map the server's terminal `result` to the UI's banner result + win amount.
+// payout is the gross credited amount; net profit shown to the player is
+// payout - stake (stake = doubled bet, but the result message uses the base bet).
+function describeResult(result) {
+  switch (result) {
+    case 'blackjack': return { banner: 'win',  message: 'Blackjack! 🎉' }
+    case 'win':       return { banner: 'win',  message: 'You win! 🎉' }
+    case 'push':      return { banner: 'push', message: 'Push — tied!' }
+    case 'loss':      return { banner: 'loss', message: 'Dealer wins.' }
+    default:          return { banner: 'loss', message: '' }
+  }
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function BlackjackGame() {
-  const { balance, placeBet } = useCasino()
+  const { balance, roundAction, loadBalance } = useCasino()
 
-  const [deck, setDeck] = useState(() => shuffle(buildDeck()))
   const [playerHand, setPlayerHand] = useState([])
   const [dealerHand, setDealerHand] = useState([])
   const [phase, setPhase] = useState('betting') // 'betting' | 'playing' | 'dealer_turn' | 'result'
   const [bet, setBet] = useState(50)
+  const [doubled, setDoubled] = useState(false)
   const [gameResult, setGameResult] = useState(null) // 'win' | 'loss' | 'push' | null
   const [message, setMessage] = useState('')
   const [wonAmount, setWonAmount] = useState(0)
-
-  const deckRef = useRef(deck)
-  deckRef.current = deck
-
-  // Keep refs in sync so the unmount cleanup always sees the latest values
-  const phaseRef = useRef(phase)
-  phaseRef.current = phase
-  const betRef = useRef(bet)
-  betRef.current = bet
-  const placeBetRef = useRef(placeBet)
-  placeBetRef.current = placeBet
-
-  // Forfeit the bet if the player navigates away mid-game.
-  // Without this, leaving on a bad hand costs nothing.
-  useEffect(() => {
-    return () => {
-      if (phaseRef.current === 'playing' || phaseRef.current === 'dealer_turn') {
-        placeBetRef.current('blackjack', betRef.current, -betRef.current)
-      }
-    }
-  }, [])
+  const [roundId, setRoundId] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
 
   // Inject keyframes once
   useEffect(() => {
@@ -225,127 +185,127 @@ export default function BlackjackGame() {
     }
   }, [])
 
-  function draw(currentDeck) {
-    const newDeck = [...currentDeck]
-    const card = newDeck.pop()
-    return { card, newDeck }
+  // Apply a server round response. On a terminal response (status !== 'active') the
+  // dealer hand is the full hand; we briefly show "dealer playing" then resolve.
+  function applyTerminal(r, baseBet, wasDoubled) {
+    const stake = wasDoubled ? baseBet * 2 : baseBet
+    const payout = r.payout ?? 0
+    const { banner, message: msg } = describeResult(r.result)
+    // Terminal responses carry the full dealer hand (stand/double/natural). A player
+    // bust carries no `dealer` — keep whatever's shown (the up-card) rather than clearing.
+    if (r.dealer) setDealerHand(r.dealer)
+    setPhase('result')
+    setGameResult(banner)
+    setMessage(r.result === 'blackjack'
+      ? 'Blackjack! 🎉'
+      : msg)
+    // Amount shown: profit on a win/bj, the stake lost on a loss, 0 on push.
+    if (banner === 'win') setWonAmount(Math.max(0, payout - stake))
+    else if (banner === 'loss') setWonAmount(stake)
+    else setWonAmount(0)
+    loadBalance()
   }
 
-  function handleDeal() {
-    if ((balance ?? 0) < bet) return
+  async function handleDeal() {
+    if ((balance ?? 0) < bet || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await roundAction('blackjack_open', { p_bet: bet })
+      setRoundId(r.round_id)
+      setDoubled(false)
+      setPlayerHand(r.player ?? [])
+      setGameResult(null)
+      setMessage('')
+      setWonAmount(0)
 
-    let d = shuffle(buildDeck())
-    const { card: p1, newDeck: d1 } = draw(d)
-    const { card: dea1, newDeck: d2 } = draw(d1)
-    const { card: p2, newDeck: d3 } = draw(d2)
-    const { card: dea2, newDeck: d4 } = draw(d3)
-
-    const ph = [p1, p2]
-    const dh = [dea1, dea2]
-
-    setDeck(d4)
-    setPlayerHand(ph)
-    setDealerHand(dh)
-    setGameResult(null)
-    setMessage('')
-    setWonAmount(0)
-
-    // Check immediate blackjack
-    if (isBlackjack(ph)) {
-      if (isBlackjack(dh)) {
-        // Both blackjack → push
-        setPhase('result')
-        setGameResult('push')
-        setMessage('Both blackjack — push!')
-        setWonAmount(0)
-        placeBet('blackjack', bet, 0)
+      if (r.done) {
+        // Natural blackjack (player and/or dealer) — resolves immediately with full dealer hand.
+        setDealerHand(r.dealer ?? [])
+        applyTerminal(r, bet, false)
       } else {
-        setPhase('result')
-        setGameResult('win')
-        const win = Math.floor(bet * 1.5)
-        setMessage('Blackjack! 🎉')
-        setWonAmount(win)
-        placeBet('blackjack', bet, win)
+        // In play — server sends only the dealer's up-card.
+        setDealerHand(r.dealer_up ? [r.dealer_up] : [])
+        setPhase('playing')
       }
-    } else {
-      setPhase('playing')
+    } catch (e) {
+      console.error('[BlackjackGame] open error:', e)
+      setError('Deal failed — try again.')
+    } finally {
+      setBusy(false)
     }
   }
 
-  function handleHit() {
-    if (phase !== 'playing') return
-    const { card, newDeck } = draw(deckRef.current)
-    const newHand = [...playerHand, card]
-    setDeck(newDeck)
-    setPlayerHand(newHand)
-
-    if (handValue(newHand) > 21) {
-      setPhase('result')
-      setGameResult('loss')
-      setMessage('Bust! Over 21.')
-      setWonAmount(bet)
-      placeBet('blackjack', bet, -bet)
+  async function handleHit() {
+    if (phase !== 'playing' || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await roundAction('blackjack_hit', { p_round: roundId })
+      setPlayerHand(r.player ?? [])
+      if (r.done) {
+        // Bust (only terminal outcome of a hit) — show the dealer pause briefly, then resolve.
+        setPhase('dealer_turn')
+        setTimeout(() => applyTerminal(r, bet, doubled), 400)
+      }
+    } catch (e) {
+      console.error('[BlackjackGame] hit error:', e)
+      setError('Hit failed — try again.')
+    } finally {
+      setBusy(false)
     }
   }
 
-  function handleStand() {
-    if (phase !== 'playing') return
+  async function handleDouble() {
+    if (phase !== 'playing' || busy) return
+    if (playerHand.length !== 2 || (balance ?? 0) < bet) return
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await roundAction('blackjack_double', { p_round: roundId })
+      setDoubled(true)
+      setPlayerHand(r.player ?? [])
+      // Double draws one card and auto-stands → terminal response.
+      setPhase('dealer_turn')
+      setTimeout(() => applyTerminal(r, bet, true), 400)
+    } catch (e) {
+      console.error('[BlackjackGame] double error:', e)
+      setError('Double failed — try again.')
+      setBusy(false)
+    }
+    // note: busy stays true through the dealer pause; cleared by Play Again reset
+    finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleStand() {
+    if (phase !== 'playing' || busy) return
+    setBusy(true)
+    setError(null)
     setPhase('dealer_turn')
-  }
-
-  // Dealer plays when phase becomes 'dealer_turn'
-  useEffect(() => {
-    if (phase !== 'dealer_turn') return
-
-    let currentHand = [...dealerHand]
-    let currentDeck = [...deckRef.current]
-
-    function dealerStep() {
-      const val = handValue(currentHand)
-      if (val < 17) {
-        const card = currentDeck.pop()
-        currentHand = [...currentHand, card]
-        setDealerHand([...currentHand])
-        setDeck([...currentDeck])
-        setTimeout(dealerStep, 500)
-      } else {
-        // Resolve
-        const dealerVal = handValue(currentHand)
-        const playerVal = handValue(playerHand)
-        setPhase('result')
-
-        if (dealerVal > 21 || playerVal > dealerVal) {
-          setGameResult('win')
-          setMessage(dealerVal > 21 ? 'Dealer busts! You win! 🎉' : 'You win! 🎉')
-          setWonAmount(bet)
-          placeBet('blackjack', bet, bet)
-        } else if (dealerVal > playerVal) {
-          setGameResult('loss')
-          setMessage('Dealer wins.')
-          setWonAmount(bet)
-          placeBet('blackjack', bet, -bet)
-        } else {
-          setGameResult('push')
-          setMessage('Push — tied!')
-          setWonAmount(0)
-          placeBet('blackjack', bet, 0)
-        }
-      }
+    try {
+      const r = await roundAction('blackjack_stand', { p_round: roundId })
+      setTimeout(() => applyTerminal(r, bet, doubled), 400)
+    } catch (e) {
+      console.error('[BlackjackGame] stand error:', e)
+      setError('Stand failed — try again.')
+      setPhase('playing')
+    } finally {
+      setBusy(false)
     }
-
-    const t = setTimeout(dealerStep, 400)
-    return () => clearTimeout(t)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase])
+  }
 
   function handlePlayAgain() {
     setPlayerHand([])
     setDealerHand([])
-    setDeck(shuffle(buildDeck()))
     setPhase('betting')
+    setDoubled(false)
     setGameResult(null)
     setMessage('')
     setWonAmount(0)
+    setRoundId(null)
+    setError(null)
   }
 
   const playerVal = handValue(playerHand)
@@ -354,6 +314,13 @@ export default function BlackjackGame() {
   const isBetting = phase === 'betting'
   const isPlaying = phase === 'playing'
   const isResult = phase === 'result'
+
+  // While the player is acting the server only sends the dealer's up-card; append a
+  // placeholder so the table still shows the familiar "one up, one face-down" layout.
+  const dealerDisplay = isPlaying && dealerHand.length === 1
+    ? [dealerHand[0], { suit: '', rank: '' }]
+    : dealerHand
+  const canDouble = isPlaying && playerHand.length === 2 && (balance ?? 0) >= bet && !busy
 
   return (
     <GameLayout title="Blackjack">
@@ -364,7 +331,7 @@ export default function BlackjackGame() {
 
           {/* Dealer hand */}
           <Hand
-            hand={dealerHand}
+            hand={dealerDisplay}
             hideSecond={phase === 'playing'}
             label="Dealer"
             score={showDealerScore ? dealerVal : (dealerHand.length > 0 ? cardValue(dealerHand[0]?.rank) : undefined)}
@@ -415,15 +382,15 @@ export default function BlackjackGame() {
           {isBetting && (
             <button
               onClick={handleDeal}
-              disabled={(balance ?? 0) < bet}
+              disabled={(balance ?? 0) < bet || busy}
               className={`w-full py-3.5 rounded-2xl font-bold text-base tracking-wide transition-all
-                ${(balance ?? 0) < bet
+                ${(balance ?? 0) < bet || busy
                   ? 'bg-cp-elevated text-cp-muted cursor-not-allowed opacity-50'
                   : 'bg-amber-400 hover:bg-amber-300 text-black shadow-[0_0_24px_rgba(251,191,36,0.3)] hover:shadow-[0_0_32px_rgba(251,191,36,0.45)] active:scale-95'
                 }
               `}
             >
-              Deal
+              {busy ? 'Dealing…' : 'Deal'}
             </button>
           )}
 
@@ -431,13 +398,28 @@ export default function BlackjackGame() {
             <div className="flex gap-3">
               <button
                 onClick={handleHit}
-                className="flex-1 py-3.5 rounded-2xl font-bold text-base tracking-wide bg-amber-400 hover:bg-amber-300 text-black shadow-[0_0_16px_rgba(251,191,36,0.2)] hover:shadow-[0_0_24px_rgba(251,191,36,0.35)] active:scale-95 transition-all"
+                disabled={busy}
+                className={`flex-1 py-3.5 rounded-2xl font-bold text-base tracking-wide transition-all
+                  ${busy
+                    ? 'bg-cp-elevated text-cp-muted cursor-not-allowed opacity-50'
+                    : 'bg-amber-400 hover:bg-amber-300 text-black shadow-[0_0_16px_rgba(251,191,36,0.2)] hover:shadow-[0_0_24px_rgba(251,191,36,0.35)] active:scale-95'
+                  }`}
               >
                 Hit
               </button>
+              {canDouble && (
+                <button
+                  onClick={handleDouble}
+                  disabled={busy}
+                  className="flex-1 py-3.5 rounded-2xl font-bold text-base tracking-wide bg-cp-elevated border border-amber-400/40 text-amber-400 hover:bg-cp-card active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Double
+                </button>
+              )}
               <button
                 onClick={handleStand}
-                className="flex-1 py-3.5 rounded-2xl font-bold text-base tracking-wide bg-cp-elevated border border-cp-border text-cp-text hover:bg-cp-card hover:border-amber-400/40 active:scale-95 transition-all"
+                disabled={busy}
+                className="flex-1 py-3.5 rounded-2xl font-bold text-base tracking-wide bg-cp-elevated border border-cp-border text-cp-text hover:bg-cp-card hover:border-amber-400/40 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Stand
               </button>
@@ -457,6 +439,12 @@ export default function BlackjackGame() {
             >
               Play Again
             </button>
+          )}
+
+          {error && (
+            <div className="text-center rounded-xl border border-red-400/30 bg-red-400/10 py-2.5 px-4 text-sm text-red-400">
+              {error}
+            </div>
           )}
         </div>
 

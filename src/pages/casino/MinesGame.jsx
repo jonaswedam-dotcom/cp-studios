@@ -12,16 +12,12 @@ function getMult(revealed, mines) {
   return +Math.max(1.01, m * 0.95).toFixed(2)
 }
 
-// ── Grid generation ───────────────────────────────────────────────────────────
-function buildGrid(mineCount) {
-  const cells = Array.from({ length: 25 }, () => ({ revealed: false, isMine: false }))
-  const positions = []
-  while (positions.length < mineCount) {
-    const p = Math.floor(Math.random() * 25)
-    if (!positions.includes(p)) positions.push(p)
-  }
-  for (const p of positions) cells[p].isMine = true
-  return cells
+// ── Empty grid ────────────────────────────────────────────────────────────────
+// Mine positions are hidden server-side; the client starts with an all-unknown
+// grid and only learns cells as the server reveals them (safe on click, all mines
+// on a bust/cash-out).
+function emptyGrid() {
+  return Array.from({ length: 25 }, () => ({ revealed: false, isMine: false }))
 }
 
 // ── Tile component ────────────────────────────────────────────────────────────
@@ -85,15 +81,18 @@ function Tile({ cell, index, onClick, disabled, revealDelay = 0 }) {
 
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function MinesGame() {
-  const { balance, placeBet } = useCasino()
+  const { balance, openRound, roundAction, cashoutRound } = useCasino()
 
   const [phase, setPhase]             = useState('setup')    // 'setup'|'playing'|'dead'|'cashedout'
-  const [grid, setGrid]               = useState(() => buildGrid(5))
+  const [grid, setGrid]               = useState(emptyGrid)
   const [mineCount, setMineCount]     = useState(3)
   const [bet, setBet]                 = useState(50)
   const [safeRevealed, setSafeRevealed] = useState(0)
   const [gameResult, setGameResult]   = useState(null)
   const [wonAmount, setWonAmount]     = useState(0)
+  const [roundId, setRoundId]         = useState(null)
+  const [busy, setBusy]               = useState(false)
+  const [error, setError]             = useState(null)
 
   const isSetup     = phase === 'setup'
   const isPlaying   = phase === 'playing'
@@ -103,82 +102,101 @@ export default function MinesGame() {
 
   const safeTilesTotal = 25 - mineCount
 
-  function handleStart() {
-    if ((balance ?? 0) < bet) return
-    setGrid(buildGrid(mineCount))
-    setSafeRevealed(0)
-    setGameResult(null)
-    setWonAmount(0)
-    setPhase('playing')
-  }
-
-  function revealAllMines(currentGrid, delay = true) {
-    const newGrid = currentGrid.map((cell) =>
-      cell.isMine ? { ...cell, revealed: true } : cell
+  // Reveal every mine using the layout the server returns on a terminal event.
+  function revealMineLayout(mines) {
+    setGrid((prev) =>
+      prev.map((cell, i) => (mines.includes(i) ? { ...cell, isMine: true, revealed: true } : cell))
     )
-    setGrid(newGrid)
   }
 
-  function handleTileClick(index) {
-    if (phase !== 'playing') return
-    const cell = grid[index]
-    if (cell.revealed) return
-
-    if (cell.isMine) {
-      // Hit a mine
-      const newGrid = grid.map((c, i) =>
-        i === index ? { ...c, revealed: true } : c
-      )
-      setGrid(newGrid)
-
-      setTimeout(() => {
-        revealAllMines(newGrid, true)
-      }, 300)
-
-      setPhase('dead')
-      setGameResult('loss')
-      setWonAmount(bet)
-      placeBet('mines', bet, -bet)
-    } else {
-      // Safe tile
-      const newGrid = grid.map((c, i) =>
-        i === index ? { ...c, revealed: true } : c
-      )
-      setGrid(newGrid)
-      const newSafe = safeRevealed + 1
-      setSafeRevealed(newSafe)
-
-      if (newSafe === safeTilesTotal) {
-        // All safe tiles found — auto cash out
-        const mult = getMult(newSafe, mineCount)
-        const win = Math.floor(bet * (mult - 1))
-        setPhase('cashedout')
-        setGameResult('win')
-        setWonAmount(win)
-        placeBet('mines', bet, win)
-      }
+  async function handleStart() {
+    if ((balance ?? 0) < bet || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await openRound('mines', { p_bet: bet, p_mines: mineCount })
+      setRoundId(r.round_id)
+      setGrid(emptyGrid())
+      setSafeRevealed(0)
+      setGameResult(null)
+      setWonAmount(0)
+      setPhase('playing')
+    } catch (e) {
+      console.error('[MinesGame] open error:', e)
+      setError('Could not start — try again.')
+    } finally {
+      setBusy(false)
     }
   }
 
-  function handleCashOut() {
-    if (phase !== 'playing' || safeRevealed === 0) return
-    const mult = getMult(safeRevealed, mineCount)
-    const win = Math.floor(bet * (mult - 1))
+  async function handleTileClick(index) {
+    if (phase !== 'playing' || busy) return
+    const cell = grid[index]
+    if (cell.revealed) return
 
-    // Reveal all mines on cash out too
-    revealAllMines(grid, true)
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await roundAction('mines_reveal', { p_round: roundId, p_cell: index })
 
-    setPhase('cashedout')
-    setGameResult('win')
-    setWonAmount(win)
-    placeBet('mines', bet, win)
+      if (r.hit) {
+        // Hit a mine — mark the clicked cell, then reveal the full layout.
+        setGrid((prev) => prev.map((c, i) => (i === index ? { ...c, isMine: true, revealed: true } : c)))
+        setTimeout(() => revealMineLayout(r.mines), 300)
+        setPhase('dead')
+        setGameResult('loss')
+        setWonAmount(bet)
+      } else {
+        // Safe tile.
+        setGrid((prev) => prev.map((c, i) => (i === index ? { ...c, revealed: true } : c)))
+        const newSafe = safeRevealed + 1
+        setSafeRevealed(newSafe)
+
+        if (newSafe === safeTilesTotal) {
+          // Server auto-cashes when all safe tiles are revealed.
+          const win = Math.floor(bet * (r.mult - 1))
+          setPhase('cashedout')
+          setGameResult('win')
+          setWonAmount(win)
+        }
+      }
+    } catch (e) {
+      console.error('[MinesGame] reveal error:', e)
+      setError('Reveal failed — try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleCashOut() {
+    if (phase !== 'playing' || safeRevealed === 0 || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await cashoutRound('mines', roundId)
+      const mult = r?.mult ?? getMult(safeRevealed, mineCount)
+      const win = r?.payout != null
+        ? Math.max(0, r.payout - bet)
+        : Math.floor(bet * (mult - 1))
+      if (r?.mines) revealMineLayout(r.mines)
+      setPhase('cashedout')
+      setGameResult('win')
+      setWonAmount(win)
+    } catch (e) {
+      console.error('[MinesGame] cashout error:', e)
+      setError('Cash out failed — try again.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   function handlePlayAgain() {
-    setGrid(buildGrid(mineCount))
+    setGrid(emptyGrid())
     setSafeRevealed(0)
     setGameResult(null)
     setWonAmount(0)
+    setRoundId(null)
+    setError(null)
     setPhase('setup')
   }
 
@@ -266,7 +284,7 @@ export default function MinesGame() {
                 cell={cell}
                 index={i}
                 onClick={() => handleTileClick(i)}
-                disabled={!isPlaying}
+                disabled={!isPlaying || busy}
                 revealDelay={delayMs}
               />
             )
@@ -288,24 +306,24 @@ export default function MinesGame() {
           {isSetup && (
             <button
               onClick={handleStart}
-              disabled={(balance ?? 0) < bet}
+              disabled={(balance ?? 0) < bet || busy}
               className={`w-full py-3.5 rounded-2xl font-bold text-base tracking-wide transition-all
-                ${(balance ?? 0) < bet
+                ${(balance ?? 0) < bet || busy
                   ? 'bg-cp-elevated text-cp-muted cursor-not-allowed opacity-50'
                   : 'bg-amber-400 hover:bg-amber-300 text-black shadow-[0_0_24px_rgba(251,191,36,0.3)] hover:shadow-[0_0_32px_rgba(251,191,36,0.45)] active:scale-95'
                 }
               `}
             >
-              Start Game
+              {busy ? 'Starting…' : 'Start Game'}
             </button>
           )}
 
           {isPlaying && (
             <button
               onClick={handleCashOut}
-              disabled={safeRevealed === 0}
+              disabled={safeRevealed === 0 || busy}
               className={`w-full py-3.5 rounded-2xl font-bold text-base tracking-wide transition-all
-                ${safeRevealed === 0
+                ${safeRevealed === 0 || busy
                   ? 'bg-cp-elevated border border-cp-border text-cp-muted cursor-not-allowed opacity-40'
                   : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-[0_0_16px_rgba(52,211,153,0.25)] hover:shadow-[0_0_24px_rgba(52,211,153,0.4)] active:scale-95'
                 }
@@ -325,6 +343,12 @@ export default function MinesGame() {
             >
               Play Again
             </button>
+          )}
+
+          {error && (
+            <div className="text-center rounded-xl border border-red-400/30 bg-red-400/10 py-2.5 px-4 text-sm text-red-400">
+              {error}
+            </div>
           )}
         </div>
 

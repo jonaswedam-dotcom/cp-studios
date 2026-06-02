@@ -59,7 +59,7 @@ function calcWin(betType, chosenNumber, resultNumber, bet) {
 }
 
 export default function RouletteGame() {
-  const { balance, placeBet } = useCasino()
+  const { balance, play } = useCasino()
 
   const [betType, setBetType]         = useState(null)  // 'red'|'black'|'odd'|'even'|'number'
   const [chosenNumber, setChosenNumber] = useState(null)
@@ -70,6 +70,7 @@ export default function RouletteGame() {
   const [wonAmount, setWonAmount]     = useState(0)
   const [wheelRotation, setWheelRotation] = useState(0)
   const [pendingRotation, setPendingRotation] = useState(null)
+  const [error, setError]             = useState(null)
 
   const spinTimeoutRef = useRef(null)
 
@@ -77,7 +78,7 @@ export default function RouletteGame() {
     return () => clearTimeout(spinTimeoutRef.current)
   }, [])
 
-  function handleSpin() {
+  async function handleSpin() {
     if (!betType || phase === 'spinning') return
     if (betType === 'number' && chosenNumber === null) return
 
@@ -85,9 +86,25 @@ export default function RouletteGame() {
     setResult(null)
     setGameResult(null)
     setWonAmount(0)
+    setError(null)
 
-    // Pick result
-    const resultNumber = Math.floor(Math.random() * 37) // 0-36
+    // Outcome comes from the server; the wheel spins toward it. Pass p_number even
+    // for color/parity bets (the server ignores it for those kinds). Fail-closed.
+    let o
+    try {
+      o = await play('roulette', {
+        p_bet: bet,
+        p_kind: betType,
+        p_number: chosenNumber ?? 0,
+      })
+    } catch (e) {
+      console.error('[RouletteGame] play error:', e)
+      setError('Spin failed — try again.')
+      setPhase('idle')
+      return
+    }
+
+    const resultNumber = o.result
     const slotIdx = WHEEL_ORDER.indexOf(resultNumber)
 
     // Each slot center is at (slotIdx + 0.5) * SLOT_DEG from top
@@ -108,7 +125,6 @@ export default function RouletteGame() {
       const { won, winAmount } = calcWin(betType, chosenNumber, resultNumber, bet)
       setGameResult(won ? 'win' : 'loss')
       setWonAmount(won ? winAmount : bet)
-      placeBet('roulette', bet, winAmount)
     }, 4200)
   }
 
@@ -117,6 +133,7 @@ export default function RouletteGame() {
     setResult(null)
     setGameResult(null)
     setWonAmount(0)
+    setError(null)
   }
 
   function selectBetType(type) {
@@ -331,6 +348,13 @@ export default function RouletteGame() {
           >
             Spin Again
           </button>
+        )}
+
+        {/* ── Error ── */}
+        {error && (
+          <div className="w-full max-w-sm text-center rounded-xl border border-red-400/30 bg-red-400/10 py-2.5 px-4 text-sm text-red-400">
+            {error}
+          </div>
         )}
 
         {/* ── Result banner ── */}

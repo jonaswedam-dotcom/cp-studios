@@ -4,6 +4,46 @@
 
 export const CW = 480              // logical board width (px)
 
+// ─── Multiplier tables (Stake-accurate), keyed by rows (8/12/16) and risk ─────
+// Each array has rows+1 entries — one per payout slot (number of right deflections,
+// 0..rows). The source of truth for both the canvas labels and the payout math.
+// keep in sync with 039_casino_play_singleshot.sql (play_plinko)
+export const MULTIPLIERS = {
+  8: {
+    low:    [5.6, 2.1, 1.1, 1.0, 0.5, 1.0, 1.1, 2.1, 5.6],
+    medium: [13,   3,  1.3, 0.7, 0.4, 0.7, 1.3,  3,  13 ],
+    high:   [29,   4,  1.5, 0.3, 0.2, 0.3, 1.5,  4,  29 ],
+  },
+  12: {
+    low:    [10,   3,  1.6, 1.4, 1.1, 1.0, 0.5, 1.0, 1.1, 1.4, 1.6,  3,  10],
+    medium: [33,  11,   4,   2,  1.1, 0.6, 0.3, 0.6, 1.1,  2,   4,  11,  33],
+    high:   [170, 24,   8,   2,  0.7, 0.2, 0.2, 0.2, 0.7,  2,   8,  24, 170],
+  },
+  16: {
+    low:    [16,   9,   2,  1.4, 1.4, 1.2, 1.1, 1.0, 0.5, 1.0, 1.1, 1.2, 1.4, 1.4,  2,   9,  16],
+    medium: [110,  41,  10,   5,   3, 1.5, 1.0, 0.5, 0.3, 0.5, 1.0, 1.5,   3,   5,  10,  41, 110],
+    high:   [1000, 130, 26,   9,   4,   2, 0.2, 0.2, 0.2, 0.2, 0.2,   2,   4,   9,  26, 130, 1000],
+  },
+}
+
+// Map a row-by-row left/right decision array to its payout slot: the slot index is
+// the number of right deflections (decisions[i] truthy = right), identical to the
+// slot `buildPath` settles into. keep in sync with 039_casino_play_singleshot.sql
+export function decisionsToSlot(decisions) {
+  return decisions.reduce((s, d) => s + (d ? 1 : 0), 0)
+}
+
+// One full server-authoritative ball drop: roll a left/right decision per row, map
+// to a slot, look up the multiplier, return the outcome the client animates plus the
+// net wallet change. delta = floor(bet*mult) - bet (matches PlinkoGame.jsx).
+// keep in sync with 039_casino_play_singleshot.sql (play_plinko)
+export function resolvePlinko({ bet, rows, risk, rng = Math.random }) {
+  const decisions = Array.from({ length: rows }, () => Math.floor(rng() * 2))
+  const slot = decisionsToSlot(decisions)
+  const mult = MULTIPLIERS[rows][risk][slot]
+  return { decisions, slot, mult, delta: Math.floor(bet * mult) - bet }
+}
+
 // ─── Board geometry: proper offset peg lattice ────────────────────────────────
 // Row i (0-indexed) has (i + 3) pegs, so the bottom row has (rows + 2) pegs that
 // form (rows + 1) gaps — one per payout slot. Pegs live on a half-spacing unit

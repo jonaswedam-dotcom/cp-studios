@@ -99,11 +99,10 @@ export function CasinoProvider({ children }) {
         }
       }
     } else {
-      // First visit — create wallet with 1000 starting coins + first daily bonus.
-      // Resolve display_name: prefer pending_users.username (set at sign-up,
-      // always present) then fall back to auth user metadata.
-      const startBalance = 1000 + DAILY_BONUS_AMOUNT
-
+      // First visit — create the wallet server-side via ensure_wallet (DEFINER RPC,
+      // migration 043) so the client can't choose its own starting balance. The
+      // server hard-codes 1000 + first daily bonus. Resolve display_name first:
+      // prefer pending_users.username (set at sign-up) then auth user metadata.
       const { data: puRow } = await supabase
         .from('pending_users')
         .select('username')
@@ -113,24 +112,24 @@ export function CasinoProvider({ children }) {
         (puRow?.username && puRow.username.trim() !== '' ? puRow.username.trim() : null) ??
         (session?.user?.user_metadata?.full_name?.trim() || null)
 
-      const { data: created, error: insertError } = await supabase
-        .from('wallets')
-        .insert({
-          user_id:          userId,
-          balance:          startBalance,
-          last_daily_bonus: new Date().toISOString(),
-          display_name:     displayName,
-        })
-        .select('balance')
-        .single()
-
-      if (insertError) {
-        console.error('[CasinoContext] wallet insert error:', insertError)
+      const { error: ensureError } = await supabase.rpc('ensure_wallet', { p_display_name: displayName })
+      if (ensureError) {
+        console.error('[CasinoContext] ensure_wallet error:', ensureError)
       } else {
-        setBalance(created.balance)
-        setDailyBonusAmount(DAILY_BONUS_AMOUNT)
-        clearTimeout(bonusTimerRef.current)
-        bonusTimerRef.current = setTimeout(() => setDailyBonusAmount(0), 5000)
+        // Re-read the wallet row to get the server-assigned balance.
+        const { data: createdRow, error: readError } = await supabase
+          .from('wallets')
+          .select('balance')
+          .eq('user_id', userId)
+          .maybeSingle()
+        if (readError || !createdRow) {
+          console.error('[CasinoContext] wallet re-read error:', readError)
+        } else {
+          setBalance(createdRow.balance)
+          setDailyBonusAmount(DAILY_BONUS_AMOUNT)
+          clearTimeout(bonusTimerRef.current)
+          bonusTimerRef.current = setTimeout(() => setDailyBonusAmount(0), 5000)
+        }
       }
     }
 
@@ -174,57 +173,52 @@ export function CasinoProvider({ children }) {
     return () => clearTimeout(bonusTimerRef.current)
   }, [])
 
-  // ── Place a bet ───────────────────────────────────────────────────────────
-  // winAmount: net change (positive = won, negative = lost, 0 = push)
-  //
-  // Settlements accumulate off balanceRef.current (the live balance) and write
-  // through a serial chain, so multiple bets resolving close together — e.g.
-  // several Plinko balls landing within the same animation frame — each build on
-  // the previous result instead of all reading the same stale base and
-  // overwriting one another (which silently dropped big wins like a 130× hit).
-  const placeBet = useCallback((game, bet, winAmount) => {
+  // ── Server-authoritative play (single-shot games) ─────────────────────────
+  // Outcome + payout are decided by the DB RPC; the client only animates toward
+  // the returned result. Fail-closed: throws on error, never resolves locally.
+  const play = useCallback(async (game, args) => {
     if (!userId) throw new Error('Not authenticated')
-
-    const newBalance = Math.max(0, (balanceRef.current ?? 0) + winAmount)
-    const result     = winAmount > 0 ? 'win' : winAmount === 0 ? 'push' : 'loss'
-    const payout     = winAmount >= 0 ? bet + winAmount : 0
-
-    // Apply locally now (sync) so the next settlement sees the updated balance.
-    balanceRef.current = newBalance
-    setBalance(newBalance)
-
-    // Serialize the network writes; each one persists the value it accumulated.
-    // settle_bet writes balance as a delta (balance + winAmount) so concurrent
-    // donations are never overwritten by a stale absolute value.
-    const run = writeChainRef.current.then(async () => {
-      const { data: actualBalance, error } = await supabase.rpc('settle_bet', {
-        p_game:       game,
-        p_bet:        bet,
-        p_result:     result,
-        p_payout:     payout,
-        p_win_amount: winAmount,
-      })
-      if (error) {
-        // settle_bet RPC unavailable (migration 032 not yet applied) — fall back
-        // to direct writes so coins always arrive. Not donation-race-safe but
-        // functional until the migration is run.
-        console.warn('[CasinoContext] settle_bet unavailable, using direct write fallback:', error.message)
-        const [walletRes, histRes] = await Promise.all([
-          supabase.from('wallets').update({ balance: newBalance }).eq('user_id', userId),
-          supabase.from('game_history').insert({ user_id: userId, game, bet, result, payout }),
-        ])
-        if (walletRes.error) console.error('[CasinoContext] wallet update error:', walletRes.error)
-        if (histRes.error)   console.error('[CasinoContext] history insert error:', histRes.error)
-      } else if (actualBalance !== null && actualBalance !== undefined) {
-        // Reconcile local state with the actual DB balance (picks up any donations
-        // that arrived while this write was in flight).
-        balanceRef.current = actualBalance
-        setBalance(actualBalance)
-      }
-    })
-    writeChainRef.current = run.catch(() => {})
-    return run.then(() => newBalance)
+    const { data, error } = await supabase.rpc(`play_${game}`, args)
+    if (error) throw error
+    if (data?.balance != null) {
+      balanceRef.current = data.balance
+      setBalance(data.balance)
+    }
+    return data
   }, [userId])
+
+  // ── Interactive round helpers (mines / chicken / blackjack) ────────────────
+  // openRound starts a round (game + '_open'); roundAction issues a mid-round
+  // action against a fully-qualified RPC name; cashoutRound settles + reloads.
+  const openRound = useCallback(async (game, args) => {
+    if (!userId) throw new Error('Not authenticated')
+    const { data, error } = await supabase.rpc(`${game}_open`, args)
+    if (error) throw error
+    if (data?.balance != null) {
+      balanceRef.current = data.balance
+      setBalance(data.balance)
+    }
+    return data
+  }, [userId])
+
+  const roundAction = useCallback(async (rpc, args) => {
+    if (!userId) throw new Error('Not authenticated')
+    const { data, error } = await supabase.rpc(rpc, args)
+    if (error) throw error
+    if (data?.balance != null) {
+      balanceRef.current = data.balance
+      setBalance(data.balance)
+    }
+    return data
+  }, [userId])
+
+  const cashoutRound = useCallback(async (game, roundId) => {
+    if (!userId) throw new Error('Not authenticated')
+    const { data, error } = await supabase.rpc(`${game}_cashout`, { p_round: roundId })
+    if (error) throw error
+    await loadBalance()
+    return data
+  }, [userId, loadBalance])
 
   // ── Adjust balance directly (used by CP War; no game_history row) ──────────
   const adjustBalance = useCallback(async (delta) => {
@@ -253,10 +247,9 @@ export function CasinoProvider({ children }) {
   const claimRefill = useCallback(async () => {
     if (!userId || !_refillKey) return
 
-    const { error } = await supabase
-      .from('wallets')
-      .update({ balance: 100 })
-      .eq('user_id', userId)
+    // Server-gated refill (DEFINER RPC, migration 043): only grants when broke and
+    // at most once per day. Returns the resulting balance.
+    const { data, error } = await supabase.rpc('claim_refill')
 
     if (error) {
       console.error('[CasinoContext] claimRefill error:', error)
@@ -264,7 +257,9 @@ export function CasinoProvider({ children }) {
     }
 
     localStorage.setItem(_refillKey, _todayStr)
-    setBalance(100)
+    const newBal = data?.balance ?? 100
+    balanceRef.current = newBal
+    setBalance(newBal)
   }, [userId, _refillKey, _todayStr])
 
   const canClaimRefill = useCallback(() => {
@@ -286,9 +281,9 @@ export function CasinoProvider({ children }) {
     return true
   }, [userId, adsEnabled, adState, adsLeftToday])
 
-  // Grants AD_REWARD_AMOUNT and persists the new cooldown/cap counters. Uses the same
-  // balanceRef + serial write chain as placeBet so it can't lose-update against an
-  // in-flight bet or war income collect. Returns the granted amount (0 if not allowed).
+  // Grants AD_REWARD_AMOUNT and persists the new cooldown/cap counters. Uses the
+  // balanceRef + serial write chain so it can't lose-update against an in-flight
+  // bet or war income collect. Returns the granted amount (0 if not allowed).
   const claimAdReward = useCallback(async () => {
     if (!userId || !canClaimAd()) return 0
 
@@ -328,7 +323,10 @@ export function CasinoProvider({ children }) {
         balance,
         loading,
         loadBalance,
-        placeBet,
+        play,
+        openRound,
+        roundAction,
+        cashoutRound,
         adjustBalance,
         claimRefill,
         canClaimRefill,

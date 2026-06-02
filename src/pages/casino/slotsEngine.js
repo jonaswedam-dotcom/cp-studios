@@ -78,6 +78,15 @@ export function netForBet(totalReturn, bet) {
   return (totalReturn - 1) * bet
 }
 
+// One full server-authoritative spin: roll the 5×3 grid, evaluate it, return the
+// outcome the client animates plus the net wallet change. The DB RPC mirrors this.
+// keep in sync with 039_casino_play_singleshot.sql (play_slots)
+export function resolveSlots({ bet, rng = Math.random }) {
+  const grid = spinGrid(rng)
+  const { totalReturn, lines } = evaluateGrid(grid)
+  return { grid, net: netForBet(totalReturn, bet), lines }
+}
+
 // Closed-form RTP from the constants (expected total return per unit bet).
 // Each payline is 5 i.i.d. cells, so E[return] = PAYLINES.length * E[one line].
 // P(leftmost symbol s, run exactly k): k=3 → p^3(1-p); k=4 → p^4(1-p); k=5 → p^5.

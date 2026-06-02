@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   SYMBOLS, REELS, ROWS, PAYLINES,
-  drawSymbol, spinGrid, evaluateGrid, netForBet, theoreticalRTP,
+  drawSymbol, spinGrid, evaluateGrid, netForBet, theoreticalRTP, resolveSlots,
 } from './slotsEngine.js'
 
 const CHERRY = 0, LEMON = 1, SEVEN = 2, STAR = 3, DIAMOND = 4
@@ -133,4 +133,24 @@ test('netForBet maps totalReturn to loss / push / win', () => {
 test('theoreticalRTP is house-positive and in the 92-94% band', () => {
   const rtp = theoreticalRTP()
   assert.ok(rtp > 0.92 && rtp < 0.94, `RTP ${rtp} out of band`)
+})
+
+test('resolveSlots: net = (totalReturn - 1) * bet, with the spun grid + lines', () => {
+  // rng()=0 always draws cherry (index 0); a full cherry grid wins every line.
+  // 3 rows (3x cherry-3 = 1 each) + 2 diagonals: V/Λ are also 5 cherries = 10 each.
+  const r = resolveSlots({ bet: 100, rng: () => 0 })
+  const { totalReturn, lines } = evaluateGrid(r.grid)
+  assert.equal(r.net, (totalReturn - 1) * 100)
+  assert.deepEqual(r.lines, lines)
+  assert.equal(r.grid.length, ROWS)
+})
+
+test('resolveSlots loss returns -bet when nothing pays', () => {
+  // cycle the 5 symbols per draw (cherry,lemon,seven,star,diamond) → every row is the
+  // same staircase, so no line ever has a 3-from-left run.
+  const buckets = [0, 6 / 20, 12 / 20, 16 / 20, 19 / 20]
+  let i = 0
+  const r = resolveSlots({ bet: 50, rng: () => buckets[i++ % buckets.length] })
+  assert.equal(r.net, -50)
+  assert.equal(r.lines.length, 0)
 })

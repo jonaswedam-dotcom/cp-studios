@@ -125,7 +125,7 @@ function LaneStrip({ laneIndex, isActive, isCrossed, isDead, isHit, chickenHere 
 
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function ChickenRoadGame() {
-  const { balance, placeBet } = useCasino()
+  const { balance, roundAction, loadBalance } = useCasino()
 
   const [phase, setPhase]         = useState('betting')  // 'betting'|'crossing'|'dead'|'safe'|'cashedout'
   const [currentLane, setCurrentLane] = useState(0)      // 0 = start, 1-7 = lanes crossed
@@ -134,6 +134,9 @@ export default function ChickenRoadGame() {
   const [wonAmount, setWonAmount] = useState(0)
   const [hitLane, setHitLane]     = useState(null)
   const [isAnimating, setIsAnimating] = useState(false)
+  const [roundId, setRoundId]     = useState(null)
+  const [busy, setBusy]           = useState(false)
+  const [error, setError]         = useState(null)
 
   // Inject keyframes for each lane's car animation once
   useEffect(() => {
@@ -161,36 +164,58 @@ export default function ChickenRoadGame() {
     }
   }, [])
 
-  function handleStart() {
-    if ((balance ?? 0) < bet) return
-    setPhase('crossing')
-    setCurrentLane(0)
-    setHitLane(null)
-    setGameResult(null)
-    setWonAmount(0)
+  async function handleStart() {
+    if ((balance ?? 0) < bet || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await roundAction('chicken_open', { p_bet: bet })
+      setRoundId(r.round_id)
+      setPhase('crossing')
+      setCurrentLane(0)
+      setHitLane(null)
+      setGameResult(null)
+      setWonAmount(0)
+    } catch (e) {
+      console.error('[ChickenRoadGame] open error:', e)
+      setError('Could not start — try again.')
+    } finally {
+      setBusy(false)
+    }
   }
 
-  function handleCross() {
-    if (phase !== 'crossing' || isAnimating) return
+  async function handleCross() {
+    if (phase !== 'crossing' || isAnimating || busy) return
     const targetLane = currentLane  // 0-indexed lane to cross (currentLane = lanes already crossed)
     if (targetLane >= NUM_LANES) return
 
     setIsAnimating(true)
-    const safe = Math.random() < SAFE_PROBS[targetLane]
+    setError(null)
+
+    // Outcome of this lane comes from the server.
+    let r
+    try {
+      r = await roundAction('chicken_step', { p_round: roundId })
+    } catch (e) {
+      console.error('[ChickenRoadGame] step error:', e)
+      setError('Cross failed — try again.')
+      setIsAnimating(false)
+      return
+    }
 
     setTimeout(() => {
-      if (safe) {
-        const newLane = currentLane + 1
+      if (r.safe) {
+        const newLane = r.lane
         setCurrentLane(newLane)
         setIsAnimating(false)
 
         if (newLane === NUM_LANES) {
-          // All lanes crossed — auto cash out
+          // All lanes crossed — server auto-cashes out.
           const win = Math.floor(bet * (LANE_MULTIPLIERS[NUM_LANES - 1] - 1))
           setPhase('cashedout')
           setGameResult('win')
           setWonAmount(win)
-          placeBet('chicken-road', bet, win)
+          loadBalance()
         }
       } else {
         setHitLane(targetLane)
@@ -198,18 +223,27 @@ export default function ChickenRoadGame() {
         setGameResult('loss')
         setWonAmount(bet)
         setIsAnimating(false)
-        placeBet('chicken-road', bet, -bet)
       }
     }, 350)
   }
 
-  function handleCashOut() {
-    if (phase !== 'crossing' || currentLane === 0) return
+  async function handleCashOut() {
+    if (phase !== 'crossing' || currentLane === 0 || busy) return
+    setBusy(true)
+    setError(null)
     const win = Math.floor(bet * (LANE_MULTIPLIERS[currentLane - 1] - 1))
-    setPhase('cashedout')
-    setGameResult('win')
-    setWonAmount(win)
-    placeBet('chicken-road', bet, win)
+    try {
+      await roundAction('chicken_cashout', { p_round: roundId })
+      setPhase('cashedout')
+      setGameResult('win')
+      setWonAmount(win)
+      await loadBalance()
+    } catch (e) {
+      console.error('[ChickenRoadGame] cashout error:', e)
+      setError('Cash out failed — try again.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   function handlePlayAgain() {
@@ -219,6 +253,8 @@ export default function ChickenRoadGame() {
     setGameResult(null)
     setWonAmount(0)
     setIsAnimating(false)
+    setRoundId(null)
+    setError(null)
   }
 
   const isBetting   = phase === 'betting'
@@ -347,15 +383,15 @@ export default function ChickenRoadGame() {
           {isBetting && (
             <button
               onClick={handleStart}
-              disabled={(balance ?? 0) < bet}
+              disabled={(balance ?? 0) < bet || busy}
               className={`w-full py-3.5 rounded-2xl font-bold text-base tracking-wide transition-all
-                ${(balance ?? 0) < bet
+                ${(balance ?? 0) < bet || busy
                   ? 'bg-cp-elevated text-cp-muted cursor-not-allowed opacity-50'
                   : 'bg-amber-400 hover:bg-amber-300 text-black shadow-[0_0_24px_rgba(251,191,36,0.3)] hover:shadow-[0_0_32px_rgba(251,191,36,0.45)] active:scale-95'
                 }
               `}
             >
-              Start 🐔
+              {busy ? 'Starting…' : 'Start 🐔'}
             </button>
           )}
 
@@ -363,9 +399,9 @@ export default function ChickenRoadGame() {
             <div className="flex gap-3">
               <button
                 onClick={handleCross}
-                disabled={isAnimating || currentLane >= NUM_LANES}
+                disabled={isAnimating || busy || currentLane >= NUM_LANES}
                 className={`flex-1 py-3.5 rounded-2xl font-bold text-base tracking-wide transition-all
-                  ${isAnimating
+                  ${isAnimating || busy
                     ? 'bg-cp-elevated text-cp-muted cursor-not-allowed opacity-50'
                     : 'bg-amber-400 hover:bg-amber-300 text-black shadow-[0_0_16px_rgba(251,191,36,0.25)] active:scale-95'
                   }
@@ -375,9 +411,9 @@ export default function ChickenRoadGame() {
               </button>
               <button
                 onClick={handleCashOut}
-                disabled={currentLane === 0 || isAnimating}
+                disabled={currentLane === 0 || isAnimating || busy}
                 className={`flex-1 py-3.5 rounded-2xl font-bold text-base tracking-wide transition-all
-                  ${currentLane === 0 || isAnimating
+                  ${currentLane === 0 || isAnimating || busy
                     ? 'bg-cp-elevated border border-cp-border text-cp-muted cursor-not-allowed opacity-40'
                     : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-[0_0_16px_rgba(52,211,153,0.25)] active:scale-95'
                   }
@@ -419,6 +455,12 @@ export default function ChickenRoadGame() {
               >
                 Play Again
               </button>
+            </div>
+          )}
+
+          {error && (
+            <div className="text-center rounded-xl border border-red-400/30 bg-red-400/10 py-2.5 px-4 text-sm text-red-400">
+              {error}
             </div>
           )}
         </div>

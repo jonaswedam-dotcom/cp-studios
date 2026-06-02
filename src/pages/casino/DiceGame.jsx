@@ -76,7 +76,7 @@ function DiceFace({ number, size = 160 }) {
 }
 
 export default function DiceGame() {
-  const { balance, placeBet } = useCasino()
+  const { balance, play } = useCasino()
 
   const [guess, setGuess]           = useState(null)   // 1-6 | null
   const [phase, setPhase]           = useState('idle') // 'idle' | 'rolling' | 'result'
@@ -85,6 +85,7 @@ export default function DiceGame() {
   const [bet, setBet]               = useState(50)
   const [gameResult, setGameResult] = useState(null)   // 'win' | 'loss' | null
   const [wonAmount, setWonAmount]   = useState(0)
+  const [error, setError]           = useState(null)
 
   const intervalRef = useRef(null)
   const timeoutRef  = useRef(null)
@@ -97,34 +98,44 @@ export default function DiceGame() {
     }
   }, [])
 
-  function handleRoll() {
+  async function handleRoll() {
     if (!guess || !bet || phase === 'rolling') return
 
     setPhase('rolling')
     setResult(null)
     setGameResult(null)
     setWonAmount(0)
+    setError(null)
 
-    // Rapid cycling
+    // Rapid cycling (cosmetic only — the real roll comes from the server).
     intervalRef.current = setInterval(() => {
       setDisplayNumber(Math.floor(Math.random() * 6) + 1)
     }, 80)
 
+    // Ask the server for the outcome; animate toward it. Fail-closed on error.
+    let o
+    try {
+      o = await play('dice', { p_bet: bet, p_guess: guess })
+    } catch (e) {
+      clearInterval(intervalRef.current)
+      console.error('[DiceGame] play error:', e)
+      setError('Roll failed — try again.')
+      setPhase('idle')
+      return
+    }
+
     timeoutRef.current = setTimeout(() => {
       clearInterval(intervalRef.current)
 
-      const rolled = Math.floor(Math.random() * 6) + 1
-      const won    = rolled === guess
+      const rolled = o.roll
+      const won    = o.win
 
       setResult(rolled)
       setDisplayNumber(rolled)
       setPhase('result')
 
-      const winAmount = won ? bet * 4 : -bet
       setGameResult(won ? 'win' : 'loss')
       setWonAmount(won ? bet * 4 : bet)
-
-      placeBet('dice', bet, winAmount)
     }, 1500)
   }
 
@@ -133,6 +144,7 @@ export default function DiceGame() {
     setResult(null)
     setGameResult(null)
     setWonAmount(0)
+    setError(null)
   }
 
   const isRolling = phase === 'rolling'
@@ -229,6 +241,13 @@ export default function DiceGame() {
           >
             Roll Again
           </button>
+        )}
+
+        {/* ── Error ── */}
+        {error && (
+          <div className="w-full max-w-sm text-center rounded-xl border border-red-400/30 bg-red-400/10 py-2.5 px-4 text-sm text-red-400">
+            {error}
+          </div>
         )}
 
         {/* ── Result banner ── */}
