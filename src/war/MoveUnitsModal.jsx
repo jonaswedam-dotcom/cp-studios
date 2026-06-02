@@ -10,6 +10,10 @@ import { UnitIcon } from './icons.jsx'
 // options — so there is NO destination dropdown. Source/mode default to the best option
 // and only surface a picker when there's a real choice. Unit counts default to "send all".
 const MODE_LABEL = { land: '🪖 Land', air: '✈️ Air', sea: '⚓ Sea' }
+// Warn unless you're comfortably ahead: combat rolls ±15% on BOTH sides (so the defender can
+// effectively be ~1.35× its shown strength on a bad roll) and enemy bunkers/labs add hidden
+// defense the client can't see. Below this margin, surface the "too weak" warning.
+const SAFE_WIN_MARGIN = 1.2
 const INPUT_TYPES = { land: ['soldier', 'tank'], air: ['jet'], sea: ['warship', 'soldier', 'tank'] }
 
 export default function MoveUnitsModal({ graph, regions, dest, sources = [], onConfirm, onClose, loading }) {
@@ -84,7 +88,7 @@ export default function MoveUnitsModal({ graph, regions, dest, sources = [], onC
   const defenderStack = isAttack ? stackFromRow(destRow) : isTake ? neutralGarrison(dest) : null
   const defenderStrength = defenderStack ? stackStrength(defenderStack) : 0
   const outgoingStrength = stackStrength(stack)
-  const tooWeak = defenderStack && !stackEmpty && outgoingStrength <= defenderStrength
+  const tooWeak = defenderStack && !stackEmpty && outgoingStrength < defenderStrength * SAFE_WIN_MARGIN
 
   const title = isAttack ? `⚔️ Attack ${destName}` : isReinforce ? `🏃 Reinforce ${destName}` : `🚩 Take ${destName}`
   const cta   = isAttack ? 'Launch Attack' : isReinforce ? 'Send' : 'Capture'

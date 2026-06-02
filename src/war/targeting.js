@@ -8,6 +8,7 @@ import { landNeighbors, distanceKm } from './geo.js'
 
 const AIR = UNITS.jet.airRangeKm
 const SEA = UNITS.warship.seaRangeKm
+const SEA_EXPAND_BADGES = 12 // most coastal neutrals a fleet badges at once (keeps the map readable)
 
 const landUnits = (r) => (r?.soldier || 0) + (r?.tank || 0)
 
@@ -85,6 +86,26 @@ export function computeTargets(regions, graph, { userId, shieldedOwnerIds = new 
         else if (hasSea && graph.regions[c.region_id]?.coastal && km <= seaRangeKm) consider(c.region_id)
       }
     }
+  }
+
+  // Sea expansion: if the player has a coastal warship, also badge the nearest unclaimed
+  // coastal quarters within sea range, so an island/coastal fleet always has a visible target.
+  // (Distant neutrals were previously only reachable by a blind direct click, which made
+  // warships feel land-locked.) Bounded to SEA_EXPAND_BADGES to keep the map readable.
+  const coastalFleetTiles = owned.filter((s) => (s.warship || 0) > 0 && graph.regions[s.region_id]?.coastal)
+  if (coastalFleetTiles.length) {
+    const seaCands = []
+    for (const [rid, gr] of Object.entries(graph.regions)) {
+      if (!gr?.coastal || !gr.centroid || kinds.has(rid) || regions[rid]?.owner_id) continue
+      let nearest = Infinity
+      for (const s of coastalFleetTiles) {
+        const sc = graph.regions[s.region_id]?.centroid
+        if (sc) nearest = Math.min(nearest, distanceKm(sc, gr.centroid))
+      }
+      if (nearest <= seaRangeKm) seaCands.push({ id: rid, km: nearest })
+    }
+    seaCands.sort((a, b) => a.km - b.km)
+    for (const c of seaCands.slice(0, SEA_EXPAND_BADGES)) consider(c.id)
   }
 
   return [...kinds].map(([id, kind]) => ({ id, kind }))

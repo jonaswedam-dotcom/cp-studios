@@ -4,6 +4,7 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import { feature } from 'topojson-client'
 import { markerEl } from './icons.jsx'
 import { UNIT_TYPES } from './units.js'
+import { neutralGarrison } from './neutral.js'
 
 const BASE_STYLE = {
   version: 8,
@@ -34,17 +35,30 @@ function regionTotal(region) {
 // A glowing, clickable hexagon badge that marks a province you can act on.
 const TARGET_COLOR = { attack: '#ef4444', expand: '#34d399', reinforce: '#38bdf8' }
 const TARGET_GLYPH = { attack: '⚔', expand: '＋', reinforce: '↑' }
-function targetMarkerEl(kind, onClick) {
+const fmtCount = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`)
+// `defenders` (when provided) is shown as a 🛡 count under the badge so "open" countries
+// reveal their hidden garrison BEFORE you attack and lose to invisible troops.
+function targetMarkerEl(kind, onClick, defenders = null) {
   const color = TARGET_COLOR[kind] || '#e5e7eb'
-  const el = document.createElement('div')
-  el.style.cssText = `width:26px;height:26px;cursor:pointer;display:flex;align-items:center;justify-content:center;` +
+  const wrap = document.createElement('div')
+  wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer'
+  const hex = document.createElement('div')
+  hex.style.cssText = `width:26px;height:26px;display:flex;align-items:center;justify-content:center;` +
     `clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);background:${color};color:#0b0b0b;` +
     `font-size:13px;font-weight:800;box-shadow:0 0 0 2px rgba(11,11,11,.65),0 0 14px ${color};` +
     `animation:war-target-pulse 1.6s ease-in-out infinite`
-  el.textContent = TARGET_GLYPH[kind] || ''
-  el.title = kind === 'attack' ? 'Attack' : kind === 'expand' ? 'Capture' : 'Reinforce'
-  el.addEventListener('click', (e) => { e.stopPropagation(); onClick() })
-  return el
+  hex.textContent = TARGET_GLYPH[kind] || ''
+  wrap.appendChild(hex)
+  if (defenders != null) {
+    const pill = document.createElement('div')
+    pill.textContent = `🛡${fmtCount(defenders)}`
+    pill.style.cssText = 'font-size:9px;font-weight:700;line-height:1;color:#fff;background:rgba(11,11,11,.82);' +
+      'border-radius:7px;padding:2px 5px;white-space:nowrap;box-shadow:0 0 0 1px rgba(255,255,255,.12)'
+    wrap.appendChild(pill)
+  }
+  wrap.title = kind === 'attack' ? 'Attack' : kind === 'expand' ? `Capture · ${defenders ?? '?'} defenders` : 'Reinforce'
+  wrap.addEventListener('click', (e) => { e.stopPropagation(); onClick() })
+  return wrap
 }
 
 export default function MapView({ graph, regions, movements, buildings = [], onRegionClick, targets = [], focus = null }) {
@@ -172,7 +186,9 @@ export default function MapView({ graph, regions, movements, buildings = [], onR
       highlightedIdsRef.current.push(id)
       const c = graph.regions[id]?.centroid
       if (!c) return
-      const el = targetMarkerEl(kind, () => onClickRef.current(id))
+      // Neutral "take" targets (expand) reveal their hidden garrison; enemy/own do not.
+      const defenders = kind === 'expand' ? neutralGarrison(id).soldier : null
+      const el = targetMarkerEl(kind, () => onClickRef.current(id), defenders)
       const mk = new maplibregl.Marker({ element: el, offset: [0, -20] }).setLngLat(c).addTo(map)
       targetMarkersRef.current.push(mk)
     })

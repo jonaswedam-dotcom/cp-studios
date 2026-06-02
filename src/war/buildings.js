@@ -8,13 +8,16 @@ export const BUILDINGS = {
   factory: { label: 'War Factory', kind: 'economy', cost: [1500, 3000, 6000], desc: 'Cheaper troops everywhere.' },
   lab:     { label: 'Command Lab', kind: 'economy', cost: [1500, 3000, 6000], desc: 'Stronger troops everywhere.' },
   bank:    { label: 'Bank',        kind: 'economy', cost: [1200, 2400, 4800], desc: 'Passive coin income.' },
+  // Coastal-only, single-tier. Unlocks warships — they are bought to (and launch from) a port.
+  port:    { label: 'Port',        kind: 'naval',   cost: [2500],             coastal: true, desc: 'Coastal only. Lets you build warships, which deploy here.' },
 }
 export const BUILDING_TYPES = Object.keys(BUILDINGS)
 
 // Cost to go from `currentLevel` to `currentLevel + 1`. currentLevel 0 = build.
+// A building's max level is the length of its cost array (3 for most, 1 for the port).
 export function buildingCost(type, currentLevel) {
   const t = BUILDINGS[type]
-  if (!t || currentLevel >= 3) return Infinity
+  if (!t || currentLevel >= t.cost.length) return Infinity
   return t.cost[currentLevel]
 }
 

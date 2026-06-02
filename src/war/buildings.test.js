@@ -1,13 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  buildingCost, SLOTS_PER_REGION, BUILDING_TYPES,
+  BUILDINGS, buildingCost, SLOTS_PER_REGION, BUILDING_TYPES,
   defenseMultiplier, antiAirFactor, costMultiplier, strengthMultiplier, incomePerTick,
   INCOME_PER_PROVINCE_PER_HOUR,
 } from './buildings.js'
 
-test('there are five building types and three slots', () => {
-  assert.equal(BUILDING_TYPES.length, 5)
+test('there are six building types (incl. port) and three slots', () => {
+  assert.equal(BUILDING_TYPES.length, 6)
   assert.equal(SLOTS_PER_REGION, 3)
 })
 
@@ -16,6 +16,12 @@ test('buildingCost scales by level and is Infinity past max', () => {
   assert.equal(buildingCost('bunker', 1), 1600)  // upgrade (1 -> 2)
   assert.equal(buildingCost('bunker', 2), 3200)  // upgrade (2 -> 3)
   assert.equal(buildingCost('bunker', 3), Infinity)
+})
+
+test('port is a single-tier, coastal-only building', () => {
+  assert.equal(BUILDINGS.port.coastal, true)        // can only be built on coastal territory
+  assert.equal(buildingCost('port', 0), 2500)       // one flat build cost
+  assert.equal(buildingCost('port', 1), Infinity)   // never upgradeable past tier 1
 })
 
 test('defenseMultiplier rises with bunker level', () => {

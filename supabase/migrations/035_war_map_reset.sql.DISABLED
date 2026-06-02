@@ -8,6 +8,13 @@
 -- COINS ARE UNTOUCHED: wallet balances live in public.wallets, not here.
 -- ─────────────────────────────────────────────────────────────────────────────
 
+-- ⛔ DISABLED 2026-06-02 — superseded by 037_war_remap_to_quarters.sql, which RESTORES the
+-- board onto the country-quarter map instead of wiping it. Running this would TRUNCATE every
+-- player's war data. The guard below aborts the script if it is ever executed. DO NOT RUN.
+do $$ begin
+  raise exception 'DISABLED: 035_war_map_reset is superseded by 037_war_remap_to_quarters. Do NOT run — it wipes the board.';
+end $$;
+
 -- Single statement so mutual FKs between these tables don't block the truncate;
 -- RESTART IDENTITY resets the war_events id sequence; CASCADE covers any dependents.
 truncate table
