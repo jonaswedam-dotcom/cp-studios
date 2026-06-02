@@ -5,9 +5,13 @@
 // longest reachable legs hit the cap. Soldiers run 3m→10m; jets stay the fastest (1m→3m).
 // Moves WITHIN your own territory (reinforcing a province you already own) resolve instantly
 // client-side — see WarPage handleMove — so these leg times only apply to attacks.
+// `landRangeKm` lets ground troops march to any province on the SAME landmass within range
+// (plus every direct border neighbour, regardless of distance) — so a nearby enemy country is
+// invadable with soldiers/tanks, not just jets. Crossing open sea to another landmass still
+// requires a warship. Kept well under the jet's airRangeKm so air stays the long-range option.
 export const UNITS = {
-  soldier: { label: 'Soldier', strength: 1, cost: 100, mode: 'land', minTravelSeconds: 180, maxTravelSeconds: 600 },  // 3m → 10m
-  tank:    { label: 'Tank',    strength: 5, cost: 400, mode: 'land', minTravelSeconds: 240, maxTravelSeconds: 600 },  // 4m → 10m
+  soldier: { label: 'Soldier', strength: 1, cost: 100, mode: 'land', minTravelSeconds: 180, maxTravelSeconds: 600, landRangeKm: 2000 },  // 3m → 10m
+  tank:    { label: 'Tank',    strength: 5, cost: 400, mode: 'land', minTravelSeconds: 240, maxTravelSeconds: 600, landRangeKm: 2000 },  // 4m → 10m
   jet:     { label: 'Jet',     strength: 3, cost: 800, mode: 'air',  minTravelSeconds: 60,  maxTravelSeconds: 180, airRangeKm: 4500 }, // 1m → 3m
   // Warships are a premium naval unit: expensive and very strong (strength 20), and they
   // ALSO ferry land units (see WARSHIP_CAPACITY). They require a Port to build and deploy to

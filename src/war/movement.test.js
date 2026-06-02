@@ -15,8 +15,29 @@ test('land move with soldiers+tanks arrives at the tank speed', () => {
   assert.equal(r.arrivesInSeconds, 240) // A→B ≈111km (< NEAR) → tank floor, the slowest in the stack
 })
 
-test('land move to a non-neighbour is rejected', () => {
+test('land move to a different landmass is rejected (open sea — warship only)', () => {
+  // C has no land link to A (other side of an ocean), so soldiers cannot march there.
   assert.ok(validateMove('A', 'C', { soldier: 10 }, graph).error)
+})
+
+test('land move reaches a same-landmass province within range, not just direct neighbours', () => {
+  // A→B→D are land-connected; D is ~222km from A but NOT a direct neighbour. Soldiers should
+  // still be able to march there (previously this was rejected, forcing a jet strike).
+  const g = { regions: {
+    A: { neighbors: ['B'],      coastal: false, centroid: [0, 0] },
+    B: { neighbors: ['A', 'D'], coastal: false, centroid: [1, 0] },
+    D: { neighbors: ['B'],      coastal: false, centroid: [2, 0] },
+  } }
+  assert.equal(validateMove('A', 'D', { soldier: 10 }, g).mode, 'land')
+})
+
+test('land move beyond land range on the same landmass is rejected', () => {
+  const g = { regions: {
+    A: { neighbors: ['B'],      coastal: false, centroid: [0, 0] },
+    B: { neighbors: ['A', 'F'], coastal: false, centroid: [1, 0] },
+    F: { neighbors: ['B'],      coastal: false, centroid: [40, 0] }, // ~4450km from A, out of land range
+  } }
+  assert.ok(validateMove('A', 'F', { soldier: 10 }, g).error)
 })
 
 test('air move (jets only) reaches far provinces and scales with distance', () => {

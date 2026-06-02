@@ -131,3 +131,35 @@ test('sourcesForDest orders same-mode sources by largest army first', () => {
   const land = s.filter((x) => x.mode === 'land')
   assert.deepEqual(land.map((x) => x.from), ['ME1', 'ME2'])
 })
+
+// ── Troops can invade nearby same-landmass countries, not only jets ────────────
+//   HOME→LINK→FOE are land-connected; FOE is ~222km from HOME but NOT a direct
+//   neighbour. A soldiers-only player must still be able to march on FOE.
+const LANDMASS_G = { regions: {
+  HOME: { centroid: [0, 0], coastal: false, neighbors: ['LINK'] },
+  LINK: { centroid: [1, 0], coastal: false, neighbors: ['HOME', 'FOE'] },
+  FOE:  { centroid: [2, 0], coastal: false, neighbors: ['LINK'] },
+  ISLE: { centroid: [3, 0], coastal: false, neighbors: [] }, // different landmass
+} }
+const LANDMASS_REG = {
+  HOME: { region_id: 'HOME', owner_id: 'me',  soldier: 100, tank: 0, jet: 0, warship: 0 },
+  LINK: { region_id: 'LINK', owner_id: 'foe', soldier: 1 },
+  FOE:  { region_id: 'FOE',  owner_id: 'foe', soldier: 1 },
+  ISLE: { region_id: 'ISLE', owner_id: 'foe', soldier: 1 },
+}
+
+test('sourcesForDest offers a land march to a same-landmass enemy that is not a direct neighbour', () => {
+  const s = sourcesForDest('FOE', LANDMASS_REG, LANDMASS_G, OPTS)
+  assert.ok(s.some((x) => x.from === 'HOME' && x.mode === 'land'), 'land option to nearby same-landmass enemy')
+})
+
+test('sourcesForDest does NOT offer a land march across open sea (different landmass)', () => {
+  const s = sourcesForDest('ISLE', LANDMASS_REG, LANDMASS_G, OPTS)
+  assert.ok(!s.some((x) => x.mode === 'land'), 'no swimming soldiers — that needs a warship')
+})
+
+test('computeTargets badges a nearby same-landmass enemy as attack for a soldiers-only player', () => {
+  const k = kindOf(computeTargets(LANDMASS_REG, LANDMASS_G, OPTS))
+  assert.equal(k.FOE, 'attack')   // reachable by land within range
+  assert.equal(k.ISLE, undefined) // open sea between — not land-reachable, no jets/ships
+})

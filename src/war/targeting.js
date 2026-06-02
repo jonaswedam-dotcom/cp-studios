@@ -4,10 +4,11 @@
 //   • sourcesForDest  → the PERMISSIVE launch options for whatever the player clicks
 //                       (so nothing reachable is ever a dead click).
 import { UNITS } from './units.js'
-import { landNeighbors, distanceKm } from './geo.js'
+import { landNeighbors, landReachable, distanceKm } from './geo.js'
 
 const AIR = UNITS.jet.airRangeKm
 const SEA = UNITS.warship.seaRangeKm
+const LAND = UNITS.soldier.landRangeKm
 const SEA_EXPAND_BADGES = 12 // most coastal neutrals a fleet badges at once (keeps the map readable)
 
 const landUnits = (r) => (r?.soldier || 0) + (r?.tank || 0)
@@ -24,7 +25,7 @@ function classify(destId, regions, userId) {
 // Every valid {from, mode} the player can launch to reach `dest`, only counting
 // sources that actually hold a unit of the matching mode. Ordered by mode
 // preference (land → sea → air) then by largest relevant army first.
-export function sourcesForDest(dest, regions, graph, { userId, airRangeKm = AIR, seaRangeKm = SEA } = {}) {
+export function sourcesForDest(dest, regions, graph, { userId, airRangeKm = AIR, seaRangeKm = SEA, landRangeKm = LAND } = {}) {
   const dc = graph.regions[dest]?.centroid
   const destCoastal = !!graph.regions[dest]?.coastal
   const out = []
@@ -35,7 +36,7 @@ export function sourcesForDest(dest, regions, graph, { userId, airRangeKm = AIR,
     const sc = graph.regions[sid]?.centroid
     const km = (sc && dc) ? distanceKm(sc, dc) : Infinity
 
-    if (landUnits(s) > 0 && landNeighbors(sid, graph).includes(dest)) {
+    if (landUnits(s) > 0 && landReachable(sid, graph, landRangeKm).includes(dest)) {
       out.push({ from: sid, mode: 'land', army: landUnits(s) })
     }
     if ((s.warship || 0) > 0 && graph.regions[sid]?.coastal && destCoastal && km <= seaRangeKm) {
@@ -56,7 +57,7 @@ export function sourcesForDest(dest, regions, graph, { userId, airRangeKm = AIR,
 //     count) — distant unclaimed neutrals are intentionally left un-badged so the map
 //     stays readable; they remain reachable via sourcesForDest when clicked directly.
 // Own provinces are never badged (reinforcement is reached by clicking your territory).
-export function computeTargets(regions, graph, { userId, shieldedOwnerIds = new Set(), airRangeKm = AIR, seaRangeKm = SEA } = {}) {
+export function computeTargets(regions, graph, { userId, shieldedOwnerIds = new Set(), airRangeKm = AIR, seaRangeKm = SEA, landRangeKm = LAND } = {}) {
   const owned = Object.values(regions).filter((r) => r.owner_id === userId)
   const claimed = Object.values(regions).filter((r) => r.owner_id && r.owner_id !== userId)
   const kinds = new Map()
@@ -72,18 +73,23 @@ export function computeTargets(regions, graph, { userId, shieldedOwnerIds = new 
   for (const s of owned) {
     const sid = s.region_id
     const sc = graph.regions[sid]?.centroid
-    if (landUnits(s) > 0) {
+    const hasLand = landUnits(s) > 0
+    if (hasLand) {
       for (const nb of landNeighbors(sid, graph)) consider(nb)
     }
     const hasJet = (s.jet || 0) > 0
     const hasSea = (s.warship || 0) > 0 && graph.regions[sid]?.coastal
-    if ((hasJet || hasSea) && sc) {
+    if ((hasJet || hasSea || hasLand) && sc) {
+      // Nearby same-landmass enemies are land-attackable too, so a soldiers-only player sees
+      // them glow (claimed enemies only — bounded by player count, keeps the map readable).
+      const landSet = hasLand ? new Set(landReachable(sid, graph, landRangeKm)) : null
       for (const c of claimed) {
         const cc = graph.regions[c.region_id]?.centroid
         if (!cc) continue
         const km = distanceKm(sc, cc)
         if (hasJet && km <= airRangeKm) consider(c.region_id)
         else if (hasSea && graph.regions[c.region_id]?.coastal && km <= seaRangeKm) consider(c.region_id)
+        else if (landSet && landSet.has(c.region_id)) consider(c.region_id)
       }
     }
   }

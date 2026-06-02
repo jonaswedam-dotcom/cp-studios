@@ -78,7 +78,7 @@ export default function Sidebar({ me, myRegions, myUnits, balance, leaderboard, 
             <p>🎯 Tap a glowing tile → pick how many → go</p>
             <p>⚔️ Red = attack a player · 🟢 Green = take free land</p>
             <p>🏗 Tap your own land to build, upgrade or reinforce</p>
-            <p>🪖 Soldiers/tanks hit bordering land · ✈️ jets fly far</p>
+            <p>🪖 Soldiers/tanks march on nearby land · ✈️ jets fly far · 🚢 ships cross the sea</p>
             <p>🚢 Build a Port on the coast, then buy warships there — pricey but devastating</p>
             <p>🛡 Green tiles show their hidden defenders — bring more</p>
             <p>💰 Buy units with coins; expand to win</p>

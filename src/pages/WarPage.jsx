@@ -290,7 +290,7 @@ function WarGame() {
     }
     const sources = sourcesForDest(regionId, regions, graph, { userId })
     if (!sources.length) {
-      showFlash('Out of range — take an adjacent province, or build jets/warships to reach further.'); return
+      showFlash('Out of range — get troops closer by land, or build jets/warships to reach further.'); return
     }
     setSendTo(regionId); setSendSources(sources)
   }, [regions, userId, graph, shieldedOwnerIds])

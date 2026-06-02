@@ -1,5 +1,5 @@
 import { UNITS, UNIT_TYPES, travelSecondsFor } from './units.js'
-import { landNeighbors, airReachable, seaReachable, centroidOf, distanceKm } from './geo.js'
+import { landReachable, airReachable, seaReachable, centroidOf, distanceKm } from './geo.js'
 
 export const WARSHIP_CAPACITY = 20 // land units ferried per warship
 
@@ -35,9 +35,11 @@ export function validateMove(fromId, toId, stack, graph) {
     if (!seaReachable(fromId, graph, UNITS.warship.seaRangeKm).includes(toId)) return { error: 'No sea route.' }
     return { mode: 'sea', arrivesInSeconds: arrival(types, fromId, toId, graph) }
   }
-  // Land: soldiers/tanks to a bordering province.
+  // Land: soldiers/tanks march over connected land — a bordering province, or a nearby one on
+  // the same landmass within the stack's land range (the slowest unit's range bounds the leg).
   if (onlyLand) {
-    if (!landNeighbors(fromId, graph).includes(toId)) return { error: 'Not a bordering province.' }
+    const landRangeKm = Math.min(...types.map((t) => UNITS[t].landRangeKm))
+    if (!landReachable(fromId, graph, landRangeKm).includes(toId)) return { error: 'No land route in range.' }
     return { mode: 'land', arrivesInSeconds: arrival(types, fromId, toId, graph) }
   }
   return { error: 'Invalid unit mix.' }
