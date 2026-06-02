@@ -27,7 +27,22 @@ export function AppProvider({ children }) {
 
   // ── Auth state ─────────────────────────────────────────────
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      // For non-admin users with a restored session, verify they're still approved.
+      // This catches players who were banned while the app was closed — they'd
+      // otherwise sail past the login check and land straight in the app.
+      if (session && !ADMIN_EMAILS.includes(session.user.email)) {
+        const { data: pu } = await supabase
+          .from('pending_users')
+          .select('status')
+          .eq('user_id', session.user.id)
+          .maybeSingle()
+        if (pu && pu.status !== 'approved') {
+          await supabase.auth.signOut()
+          setAuthLoading(false)
+          return
+        }
+      }
       setSession(session)
       setAuthLoading(false)
     })
@@ -38,6 +53,25 @@ export function AppProvider({ children }) {
 
     return () => subscription.unsubscribe()
   }, [])
+
+  // ── Real-time ban enforcement ──────────────────────────────
+  // Subscribe to the user's own pending_users row. If an admin revokes them
+  // while they're actively using the app, this fires immediately and signs
+  // them out — no need to wait for their next login attempt.
+  // Requires migration 033 (pending_users added to supabase_realtime publication).
+  useEffect(() => {
+    if (!session?.user?.id || ADMIN_EMAILS.includes(session.user.email)) return
+    const uid = session.user.id
+    const channel = supabase
+      .channel(`ban-watch-${uid}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'pending_users', filter: `user_id=eq.${uid}` },
+        (payload) => { if (payload.new?.status !== 'approved') supabase.auth.signOut() }
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [session?.user?.id])
 
   // ── Load profiles when logged in ───────────────────────────
   const loadProfiles = useCallback(async () => {
