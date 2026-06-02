@@ -1,13 +1,14 @@
 // Single source of truth for unit stats. All values are tunable.
-// Travel times are tuned for an active session-friendly pace (tens of minutes):
-// the world advances via the server tick, and the leg length still gives a
-// defender time to log in and react (pairs with the 48h/offline shields).
-// Keep these short (e.g. 20–60s) while testing the tick locally, then restore.
+// Travel times are tuned for an active, fast-paced session (single-digit minutes):
+// the world advances via the per-minute server tick, so the practical floor on an
+// attack leg is the tick cadence. Moves WITHIN your own territory (reinforcing a
+// province you already own) resolve instantly client-side — see WarPage handleMove —
+// so these leg times only apply to attacks on enemy/neutral provinces.
 export const UNITS = {
-  soldier: { label: 'Soldier', strength: 1, cost: 100, mode: 'land', travelSeconds: 1200 },   // 20m
-  tank:    { label: 'Tank',    strength: 5, cost: 400, mode: 'land', travelSeconds: 2400 },   // 40m
-  jet:     { label: 'Jet',     strength: 3, cost: 800, mode: 'air',  travelSeconds: 600, airRangeKm: 4500 }, // 10m
-  warship: { label: 'Warship', strength: 2, cost: 600, mode: 'sea',  travelSeconds: 2400, seaRangeKm: 7000 }, // 40m
+  soldier: { label: 'Soldier', strength: 1, cost: 100, mode: 'land', travelSeconds: 180 },   // 3m
+  tank:    { label: 'Tank',    strength: 5, cost: 400, mode: 'land', travelSeconds: 300 },   // 5m
+  jet:     { label: 'Jet',     strength: 3, cost: 800, mode: 'air',  travelSeconds: 60, airRangeKm: 4500 }, // 1m
+  warship: { label: 'Warship', strength: 2, cost: 600, mode: 'sea',  travelSeconds: 300, seaRangeKm: 7000 }, // 5m
 }
 
 export const UNIT_TYPES = ['soldier', 'tank', 'jet', 'warship']

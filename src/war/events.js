@@ -15,7 +15,9 @@ export function describeEvent(ev, graph) {
     case 'defended':
       return { icon: '🛡', text: `Defended ${where}${d.opponent ? ` from ${d.opponent}` : ''}` }
     case 'attack_failed':
-      return { icon: '✈', text: `Attack on ${where} failed` }
+      return { icon: '✈', text: d.neutral
+        ? `Your attack on ${where} was repelled by its garrison`
+        : `Attack on ${where} failed` }
     case 'bounced':
       return { icon: '↩', text: `Forces bounced off ${where} (shielded)` }
     case 'eliminated':

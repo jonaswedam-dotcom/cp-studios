@@ -158,20 +158,36 @@ function WarGame() {
       const v = validateMove(from, dest, stack, graph)
       if (v.error) { showFlash(v.error); return }
       const destRow = regions[dest]
-      const destShielded = destRow?.owner_id && destRow.owner_id !== userId &&
+      const isReinforce = destRow?.owner_id === userId
+      const destShielded = !isReinforce && destRow?.owner_id &&
         players.some((p) => p.user_id === destRow.owner_id && p.shield_until && new Date(p.shield_until) > new Date())
       if (destShielded) { showFlash("That player is shielded — you can't attack yet."); return }
+      const decStack = {}; for (const t of UNIT_TYPES) decStack[t] = (src[t] || 0) - (stack[t] || 0)
+      const rollbackSrc = () => supabase.from('war_regions')
+        .update({ ...Object.fromEntries(UNIT_TYPES.map((t) => [t, src[t] || 0])), updated_at: new Date().toISOString() })
+        .eq('region_id', from)
+
+      // Within your own territory, reinforcing is instant: shift the stack straight from
+      // source to destination (both are yours, so RLS lets the client write them directly,
+      // same trust level as buying units) — no travel leg, no waiting for the server tick.
+      if (isReinforce) {
+        const { error: decErr } = await supabase.from('war_regions').update({ ...decStack, updated_at: new Date().toISOString() }).eq('region_id', from)
+        if (decErr) { showFlash('Move failed.'); return }
+        const incStack = {}; for (const t of UNIT_TYPES) incStack[t] = (destRow[t] || 0) + (stack[t] || 0)
+        const { error: incErr } = await supabase.from('war_regions').update({ ...incStack, updated_at: new Date().toISOString() }).eq('region_id', dest)
+        if (incErr) { await rollbackSrc(); showFlash('Move failed.'); return }
+        showFlash(`Reinforced ${graph.regions[dest]?.city || dest}.`)
+        return
+      }
+
+      // Attack / take: the force travels and resolves server-side (war_tick) on arrival.
       const arrivesAt = new Date(Date.now() + v.arrivesInSeconds * 1000).toISOString()
-      const dec = {}; for (const t of UNIT_TYPES) dec[t] = (src[t] || 0) - (stack[t] || 0)
-      const { error: decErr } = await supabase.from('war_regions').update({ ...dec, updated_at: new Date().toISOString() }).eq('region_id', from)
+      const { error: decErr } = await supabase.from('war_regions').update({ ...decStack, updated_at: new Date().toISOString() }).eq('region_id', from)
       if (decErr) { showFlash('Move failed.'); return }
       const { error: mvErr } = await supabase.from('war_movements').insert({
         player_id: userId, from_region: from, to_region: dest, units: stack, mode: v.mode, arrives_at: arrivesAt,
       })
-      if (mvErr) {
-        await supabase.from('war_regions').update({ ...Object.fromEntries(UNIT_TYPES.map((t) => [t, src[t] || 0])), updated_at: new Date().toISOString() }).eq('region_id', from)
-        showFlash('Move failed.'); return
-      }
+      if (mvErr) { await rollbackSrc(); showFlash('Move failed.'); return }
       showFlash(`Force en route — arrives in ${formatDuration(v.arrivesInSeconds)}`)
     } finally { setSendTo(null); setSendSources([]); setBusy(false) }
   }, [busy, regions, userId, players, graph])

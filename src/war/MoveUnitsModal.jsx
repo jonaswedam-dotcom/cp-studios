@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from 'react'
 import { UNITS, formatDuration } from './units.js'
 import { validateMove, WARSHIP_CAPACITY } from './movement.js'
+import { stackStrength, stackFromRow } from './combat.js'
+import { neutralGarrison } from './neutral.js'
 import { UnitIcon } from './icons.jsx'
 
 // Streamlined "send forces" panel. The destination is already chosen (the province the
@@ -75,6 +77,15 @@ export default function MoveUnitsModal({ graph, regions, dest, sources = [], onC
   const remaining = inputTypes.reduce((s, t) => s + Math.max(0, available(t) - (parseInt(counts[t]) || 0)), 0)
   const armyFor = (c) => INPUT_TYPES[c.mode].reduce((s, t) => s + (regions[c.from]?.[t] || 0), 0)
 
+  // Pre-combat info: estimate the defender we're up against and our outgoing strength.
+  // Neutral "Take" → deterministic garrison; enemy "Attack" → visible unit stack (buildings
+  // unknown to the client, so it's a lower bound). Reinforce has no defender.
+  const isTake = !destRow?.owner_id
+  const defenderStack = isAttack ? stackFromRow(destRow) : isTake ? neutralGarrison(dest) : null
+  const defenderStrength = defenderStack ? stackStrength(defenderStack) : 0
+  const outgoingStrength = stackStrength(stack)
+  const tooWeak = defenderStack && !stackEmpty && outgoingStrength <= defenderStrength
+
   const title = isAttack ? `⚔️ Attack ${destName}` : isReinforce ? `🏃 Reinforce ${destName}` : `🚩 Take ${destName}`
   const cta   = isAttack ? 'Launch Attack' : isReinforce ? 'Send' : 'Capture'
   const ctaColor = isAttack ? 'bg-red-600 hover:bg-red-500' : isReinforce ? 'bg-sky-600 hover:bg-sky-500' : 'bg-emerald-600 hover:bg-emerald-500'
@@ -84,6 +95,15 @@ export default function MoveUnitsModal({ graph, regions, dest, sources = [], onC
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-sm bg-cp-card border border-cp-border rounded-3xl p-6 space-y-4 shadow-2xl modal-in">
         <h3 className="font-display text-lg text-cp-text">{title}</h3>
+
+        {/* Defender strength estimate so the player doesn't send blindly */}
+        {defenderStack && (
+          <p className="text-xs text-cp-muted">
+            {isTake
+              ? <>🛡️ Defended by <span className="text-cp-text font-medium">{defenderStack.soldier.toLocaleString()}</span> soldiers (strength {defenderStrength.toLocaleString()})</>
+              : <>🛡️ Defender strength <span className="text-cp-text font-medium">≥ {defenderStrength.toLocaleString()}</span> (buildings may add more)</>}
+          </p>
+        )}
 
         {/* Source / mode picker — only when there's more than one way to attack */}
         {sources.length > 1 ? (
@@ -144,12 +164,25 @@ export default function MoveUnitsModal({ graph, regions, dest, sources = [], onC
           )}
           {!stackEmpty && !validation.error && !seaOver && (
             <p className="text-xs text-cp-muted">
-              Arrives in <span className="text-cp-text font-medium">{formatDuration(validation.arrivesInSeconds)}</span>
+              {isReinforce
+                ? <>Arrives <span className="text-cp-text font-medium">instantly</span> (your territory)</>
+                : <>Arrives in <span className="text-cp-text font-medium">{formatDuration(validation.arrivesInSeconds)}</span></>}
               {fromRow && <> · leaves <span className="text-cp-text font-medium">{remaining.toLocaleString()}</span> in {graph.regions[from]?.city || from}</>}
             </p>
           )}
           {validation.error && !stackEmpty && !seaOver && <p className="text-xs text-red-400">{validation.error}</p>}
           {!enough && !stackEmpty && <p className="text-xs text-red-400">Not enough units available.</p>}
+
+          {/* Pre-combat strength comparison + weakness warning */}
+          {defenderStack && !stackEmpty && (
+            <>
+              <p className="text-xs text-cp-muted">
+                ⚔️ Your force strength <span className="text-cp-text font-medium">{outgoingStrength.toLocaleString()}</span> vs defender {isTake ? '' : '≥ '}{defenderStrength.toLocaleString()}
+              </p>
+              {tooWeak && <p className="text-xs text-amber-400 font-medium">⚠️ Your force looks too weak to win this.</p>}
+              <p className="text-[11px] text-cp-muted">Estimate only — combat rolls ±15% luck; buildings & labs also count.</p>
+            </>
+          )}
         </div>
 
         <div className="flex gap-3 pt-1">

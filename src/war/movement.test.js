@@ -12,7 +12,7 @@ const graph = { regions: {
 test('land move with soldiers+tanks arrives at the tank speed', () => {
   const r = validateMove('A', 'B', { soldier: 100, tank: 5 }, graph)
   assert.equal(r.mode, 'land')
-  assert.equal(r.arrivesInSeconds, 2400) // tank
+  assert.equal(r.arrivesInSeconds, 300) // tank (slowest in the stack)
 })
 
 test('land move to a non-neighbour is rejected', () => {
@@ -22,13 +22,13 @@ test('land move to a non-neighbour is rejected', () => {
 test('air move (jets only) reaches far provinces', () => {
   const r = validateMove('A', 'X', { jet: 10 }, graph)
   assert.equal(r.mode, 'air')
-  assert.equal(r.arrivesInSeconds, 600)
+  assert.equal(r.arrivesInSeconds, 60)
 })
 
 test('sea move ferries land units within warship capacity', () => {
   const r = validateMove('A', 'C', { warship: 5, soldier: WARSHIP_CAPACITY * 5 }, graph)
   assert.equal(r.mode, 'sea')
-  assert.equal(r.arrivesInSeconds, 2400)
+  assert.equal(r.arrivesInSeconds, 300)
 })
 
 test('sea move over capacity is rejected', () => {
