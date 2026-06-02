@@ -6,9 +6,6 @@ import { supabase } from '../../supabase'
 import FlightBoard from './FlightBoard'
 import { GROWTH_RATE } from './aviatorTrajectory'
 
-const BETTING_WINDOW_SECS = 5   // must match migration 047
-const POST_CRASH_GAP_SECS = 3   // gap before next round is created
-
 function pillStyle(m) {
   if (m < 2)  return { color: '#f87171', borderColor: '#7f1d1d', background: '#2a1112' }
   if (m <= 5) return { color: '#fcd34d', borderColor: '#854d0e', background: '#2a210f' }
@@ -25,20 +22,17 @@ export default function AviatorGame() {
   const [myBet,     setMyBet]     = useState(null)
   const [betAmount, setBetAmount] = useState(50)
   const [localMult, setLocalMult] = useState(1.0)
-  const [countdown,    setCountdown]    = useState(BETTING_WINDOW_SECS)
-  const [nextRoundIn,  setNextRoundIn]  = useState(null)
+  const [countdown, setCountdown] = useState(15)
   const [placing,        setPlacing]        = useState(false)
   const [cashing,        setCashing]        = useState(false)
   const [error,          setError]          = useState('')
   const [crashAnimating, setCrashAnimating] = useState(false)
   const [cashoutFeed, setCashoutFeed] = useState([])
 
-  const roundRef        = useRef(round)
-  const rafRef          = useRef(null)
-  const crashTimerRef   = useRef(null)
+  const roundRef   = useRef(round)
+  const rafRef         = useRef(null)
+  const crashTimerRef  = useRef(null)
   roundRef.current = round
-
-  // ── Fetch helpers ────────────────────────────────────────────────────────────
 
   const fetchBets = useCallback(async (roundId) => {
     const { data } = await supabase
@@ -74,9 +68,8 @@ export default function AviatorGame() {
       .limit(1)
       .maybeSingle()
     setRound(prev => {
+      // Don't overwrite if Realtime already gave us a more recent round
       if (prev && data && prev.id !== data.id && prev.status !== 'crashed') return prev
-      // Don't wipe the crashed board while waiting for the next round to be created
-      if (data === null && prev?.status === 'crashed') return prev
       return data ?? null
     })
     if (data?.id) fetchBetsRef.current(data.id)
@@ -89,8 +82,6 @@ export default function AviatorGame() {
     fetchHistory()
   }, [fetchCurrentRound, fetchHistory])
 
-  // ── Realtime handlers ────────────────────────────────────────────────────────
-
   const handleRoundChange = useCallback((payload) => {
     const updated = payload.new
     if (!updated) return
@@ -102,7 +93,6 @@ export default function AviatorGame() {
       setLocalMult(1.0)
       setError('')
       setCrashAnimating(false)
-      clearTimeout(crashTimerRef.current)
       return
     }
     setRound(prev => (prev?.id === updated.id ? updated : prev))
@@ -113,15 +103,13 @@ export default function AviatorGame() {
     }
     if (updated.status === 'crashed') {
       cancelAnimationFrame(rafRef.current)
-      setError('')
       setCrashAnimating(true)
       fetchHistoryRef.current()
-      // Short animation window — Realtime for the next 'waiting' round will
-      // end it early; this is just a fallback if it arrives after 2 s.
       crashTimerRef.current = setTimeout(() => {
         setCrashAnimating(false)
         setMyBet(null)
-      }, 2000)
+        fetchCurrentRoundRef.current()
+      }, 4000)
     }
   }, [])
 
@@ -154,18 +142,6 @@ export default function AviatorGame() {
     return () => { supabase.removeChannel(channel) }
   }, [handleRoundChange, handleBetChange])
 
-  // ── Client-driven round advancement (replaces the pg_sleep cron approach) ────
-  // Each connected client fires this every second. The server-side advisory lock
-  // ensures only one call does real work at a time; the rest return instantly.
-  useEffect(() => {
-    const iv = setInterval(() => {
-      supabase.rpc('aviator_advance_round')
-    }, 1000)
-    return () => clearInterval(iv)
-  }, [])
-
-  // ── Multiplier animation ─────────────────────────────────────────────────────
-
   useEffect(() => {
     if (round?.status !== 'flying' || !round.started_at) return
     let active = true
@@ -174,44 +150,26 @@ export default function AviatorGame() {
       const r = roundRef.current
       if (!r?.started_at) return
       const elapsed = (Date.now() - new Date(r.started_at).getTime()) / 1000
-      // Safety cap at 100 — crash_points are ≤ 100 on the server.
-      // With 1-second client polling this cap should never visibly trigger.
-      setLocalMult(Math.min(100, +Math.exp(GROWTH_RATE * Math.max(0, elapsed)).toFixed(2)))
+      setLocalMult(+Math.exp(GROWTH_RATE * Math.max(0, elapsed)).toFixed(2))
       rafRef.current = requestAnimationFrame(tick)
     }
     rafRef.current = requestAnimationFrame(tick)
     return () => { active = false; cancelAnimationFrame(rafRef.current) }
   }, [round?.status, round?.started_at])
 
-  // ── Betting window countdown ─────────────────────────────────────────────────
-
   useEffect(() => {
-    if (round?.status !== 'waiting') { setCountdown(BETTING_WINDOW_SECS); return }
+    if (round?.status !== 'waiting') { setCountdown(15); return }
     const iv = setInterval(() => {
       const elapsed = (Date.now() - new Date(round.created_at).getTime()) / 1000
-      setCountdown(Math.max(0, Math.ceil(BETTING_WINDOW_SECS - elapsed)))
+      setCountdown(Math.max(0, Math.ceil(15 - elapsed)))
     }, 200)
     return () => clearInterval(iv)
   }, [round?.status, round?.created_at])
-
-  // ── Between-rounds countdown (crash → next takeoff) ──────────────────────────
-
-  useEffect(() => {
-    if (round?.status !== 'crashed' || !round.crashed_at) { setNextRoundIn(null); return }
-    // Total gap: POST_CRASH_GAP_SECS until new round created + BETTING_WINDOW_SECS
-    const target = new Date(round.crashed_at).getTime() + (POST_CRASH_GAP_SECS + BETTING_WINDOW_SECS) * 1000
-    const iv = setInterval(() => {
-      setNextRoundIn(Math.max(0, Math.ceil((target - Date.now()) / 1000)))
-    }, 200)
-    return () => clearInterval(iv)
-  }, [round?.status, round?.crashed_at])
 
   useEffect(() => () => {
     cancelAnimationFrame(rafRef.current)
     clearTimeout(crashTimerRef.current)
   }, [])
-
-  // ── Loading states ───────────────────────────────────────────────────────────
 
   if (round === undefined || balance === null) {
     return (
@@ -234,8 +192,7 @@ export default function AviatorGame() {
     )
   }
 
-  // ── Place bet ─────────────────────────────────────────────────────────────────
-
+  // ── Place bet ─────────────────────────────────────────────────────────────
   const handlePlaceBet = async () => {
     if (!round || round.status !== 'waiting') return
     if (!betAmount || betAmount < 1 || betAmount > (balance ?? 0)) return
@@ -254,8 +211,7 @@ export default function AviatorGame() {
     setPlacing(false)
   }
 
-  // ── Cash out ──────────────────────────────────────────────────────────────────
-
+  // ── Cash out ──────────────────────────────────────────────────────────────
   const handleCashOut = async () => {
     if (!myBet || myBet.status !== 'active') return
     if (round?.status !== 'flying') return
@@ -272,8 +228,7 @@ export default function AviatorGame() {
     setCashing(false)
   }
 
-  // ── Derived display values ────────────────────────────────────────────────────
-
+  // ── Derived display values ────────────────────────────────────────────────
   const isWaiting  = round?.status === 'waiting'
   const isFlying   = round?.status === 'flying'
   const isCrashed  = round?.status === 'crashed' || crashAnimating
@@ -327,17 +282,17 @@ export default function AviatorGame() {
               bet={myBet?.bet_amount ?? betAmount}
             />
 
-            {/* Waiting overlay: betting countdown */}
+            {/* Waiting overlay: countdown */}
             {isWaiting && (
               <div style={{
                 position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
                 alignItems: 'center', justifyContent: 'center', gap: 6, pointerEvents: 'none',
               }}>
                 <div style={{ fontSize: 13, color: '#78716c', fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-                  {countdown > 0 ? 'Betting closes in' : 'Launching…'}
+                  {countdown > 0 ? 'Next round in' : 'Launching…'}
                 </div>
                 {countdown > 0 && (
-                  <div style={{ fontSize: 64, fontWeight: 800, color: '#fde68a', lineHeight: 1, fontFamily: '"Playfair Display", Georgia, serif', textShadow: '0 0 28px rgba(251,191,36,0.4)' }}>
+                  <div style={{ fontSize: 48, fontWeight: 800, color: '#fde68a', lineHeight: 1, fontFamily: '"Playfair Display", Georgia, serif', textShadow: '0 0 28px rgba(251,191,36,0.4)' }}>
                     {countdown}
                   </div>
                 )}
@@ -346,22 +301,6 @@ export default function AviatorGame() {
                     Bet placed — {formatCoins(myBet.bet_amount)} coins
                   </div>
                 )}
-              </div>
-            )}
-
-            {/* Crashed overlay: next round countdown */}
-            {isCrashed && nextRoundIn != null && (
-              <div style={{
-                position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
-                alignItems: 'center', justifyContent: 'flex-end', gap: 4, pointerEvents: 'none',
-                paddingBottom: 22,
-              }}>
-                <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-                  Next round in
-                </div>
-                <div style={{ fontSize: 40, fontWeight: 800, color: '#f87171', lineHeight: 1, fontFamily: '"Playfair Display", Georgia, serif' }}>
-                  {nextRoundIn}
-                </div>
               </div>
             )}
           </div>
@@ -424,13 +363,6 @@ export default function AviatorGame() {
               </div>
             )}
 
-            {/* Flying: bet marked lost before round crash event arrives */}
-            {isFlying && hasBet && myBet?.status === 'lost' && (
-              <div className="text-center py-3 rounded-xl bg-red-400/10 border border-red-400/25 text-red-400 font-semibold text-sm">
-                Round crashed — lost {formatCoins(myBet.bet_amount)} coins
-              </div>
-            )}
-
             {/* Flying: already cashed out */}
             {isFlying && cashedOut && (
               <div className="text-center py-3 rounded-xl bg-emerald-400/10 border border-emerald-400/25 text-emerald-400 font-semibold text-sm">
@@ -452,12 +384,10 @@ export default function AviatorGame() {
               </div>
             )}
 
-            {/* Crashed: no bet — show next-round countdown */}
+            {/* Crashed: no bet placed */}
             {isCrashed && !myBet && (
               <div className="text-center py-2 text-cp-muted text-sm">
-                {nextRoundIn != null && nextRoundIn > 0
-                  ? `Next round in ${nextRoundIn}s…`
-                  : 'Next round starting…'}
+                Next round starting soon…
               </div>
             )}
           </div>
