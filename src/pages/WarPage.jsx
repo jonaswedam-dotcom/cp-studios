@@ -249,6 +249,17 @@ function WarGame() {
     return computeTargets(regions, graph, { userId, shieldedOwnerIds })
   }, [graph, userId, regions, shieldedOwnerIds])
 
+  // Where to drop the camera on open: the HQ city province (fall back to any owned
+  // province, then the recorded spawn). Centroid identity stays stable while the HQ
+  // doesn't move, so MapView only flies once per open.
+  const focus = useMemo(() => {
+    if (!graph) return null
+    const hq = myRegionRows.find((r) => r.is_hq) || myRegionRows[0]
+    const regionId = hq?.region_id || me?.spawn_region
+    return regionId ? graph.regions[regionId]?.centroid || null : null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph, me?.spawn_region, myRegionRows.find((r) => r.is_hq)?.region_id, myRegionRows[0]?.region_id])
+
   // Can this owned province receive reinforcements from another of mine?
   const reinforceSources = useCallback(
     (regionId) => sourcesForDest(regionId, regions, graph, { userId }),
@@ -307,7 +318,7 @@ function WarGame() {
       )}
 
       <div className="relative flex-1 overflow-hidden">
-        <MapView graph={graph} regions={regions} movements={movements} buildings={buildings} onRegionClick={onRegionClick} targets={targets} />
+        <MapView graph={graph} regions={regions} movements={movements} buildings={buildings} onRegionClick={onRegionClick} targets={targets} focus={focus} />
         <div className="absolute top-3 left-3 z-10 bg-cp-card/90 border border-cp-border rounded-xl px-3 py-2 text-[11px] text-cp-muted shadow-xl backdrop-blur-sm pointer-events-none space-y-0.5">
           <p className="flex items-center gap-1.5"><span className="text-red-400">⬡</span> Tap a glowing tile to attack / take it</p>
           <p className="flex items-center gap-1.5"><span className="text-sky-300">⬡</span> Tap your own land to build or reinforce</p>

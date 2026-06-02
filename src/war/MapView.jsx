@@ -47,7 +47,7 @@ function targetMarkerEl(kind, onClick) {
   return el
 }
 
-export default function MapView({ graph, regions, movements, buildings = [], onRegionClick, targets = [] }) {
+export default function MapView({ graph, regions, movements, buildings = [], onRegionClick, targets = [], focus = null }) {
   const mapRef     = useRef(null)
   const containerRef = useRef(null)
   const markersRef = useRef([])     // unit/HQ markers
@@ -57,6 +57,7 @@ export default function MapView({ graph, regions, movements, buildings = [], onR
   const [ready, setReady] = useState(false) // state (not just ref) so paint effects re-run once the map is loaded
   const onClickRef = useRef(onRegionClick)
   const highlightedIdsRef = useRef([]) // ids that currently have 'reach' feature-state set
+  const focusedRef = useRef(false) // have we already flown to the player's HQ on this mount?
   useEffect(() => { onClickRef.current = onRegionClick })
 
   // Init map once
@@ -70,7 +71,7 @@ export default function MapView({ graph, regions, movements, buildings = [], onR
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: BASE_STYLE,
-      center: [0, 25], zoom: 1.6, maxZoom: 5.5, minZoom: 1,
+      center: [0, 25], zoom: 1.6, maxZoom: 8, minZoom: 1,
       attributionControl: true,
     })
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right')
@@ -177,6 +178,14 @@ export default function MapView({ graph, regions, movements, buildings = [], onR
     })
   }
   useEffect(syncTargets, [targets, graph, ready])
+
+  // On open, zoom from the world view into the player's HQ island (once per mount).
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !readyRef.current || !focus || focusedRef.current) return
+    focusedRef.current = true
+    map.flyTo({ center: focus, zoom: 5, duration: 2200 })
+  }, [focus, ready])
 
   // In-transit movement dots (interpolated each animation frame)
   useEffect(() => {
