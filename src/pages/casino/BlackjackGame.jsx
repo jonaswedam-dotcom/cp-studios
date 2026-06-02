@@ -191,6 +191,24 @@ export default function BlackjackGame() {
   const deckRef = useRef(deck)
   deckRef.current = deck
 
+  // Keep refs in sync so the unmount cleanup always sees the latest values
+  const phaseRef = useRef(phase)
+  phaseRef.current = phase
+  const betRef = useRef(bet)
+  betRef.current = bet
+  const placeBetRef = useRef(placeBet)
+  placeBetRef.current = placeBet
+
+  // Forfeit the bet if the player navigates away mid-game.
+  // Without this, leaving on a bad hand costs nothing.
+  useEffect(() => {
+    return () => {
+      if (phaseRef.current === 'playing' || phaseRef.current === 'dealer_turn') {
+        placeBetRef.current('blackjack', betRef.current, -betRef.current)
+      }
+    }
+  }, [])
+
   // Inject keyframes once
   useEffect(() => {
     const id = 'bj-card-deal-kf'
