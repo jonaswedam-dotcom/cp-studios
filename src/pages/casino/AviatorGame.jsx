@@ -123,7 +123,7 @@ export default function AviatorGame() {
     })
     if (updated.user_id === currentUser?.id) {
       setMyBet(updated)
-      if (updated.status === 'cashed_out') loadBalance()
+      if (updated.status === 'cashed_out' || updated.status === 'lost') loadBalance()
     }
     if (updated.status === 'cashed_out' && updated.cashout_multiplier) {
       setCashoutFeed(prev => [
