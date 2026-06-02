@@ -83,7 +83,7 @@ function BigWinBurst({ multiplier, amount }) {
 }
 
 export default function AviatorGame() {
-  const { balance, placeBet } = useCasino()
+  const { balance, adjustBalance } = useCasino()
 
   const [phase, setPhase] = useState('betting') // betting | flying | crashed | cashedout
   const [multiplier, setMultiplier] = useState(1.0)
@@ -100,14 +100,14 @@ export default function AviatorGame() {
   const multiplierRef = useRef(1.0)
   const settledRef = useRef(false) // ensures a round settles (pays out) exactly once
   const betRef = useRef(bet)
-  const placeBetRef = useRef(placeBet)
+  const adjustBalanceRef = useRef(adjustBalance)
   // Refs for imperative DOM updates — the multiplier text updates every RAF frame
   // without going through React's reconciliation cycle, keeping it perfectly smooth.
   const multTextRef = useRef(null)
   const multSubRef  = useRef(null)
 
   useEffect(() => { betRef.current = bet }, [bet])
-  useEffect(() => { placeBetRef.current = placeBet }, [placeBet])
+  useEffect(() => { adjustBalanceRef.current = adjustBalance }, [adjustBalance])
 
   function recordRound(crashMult) {
     setHistory((prev) => {
@@ -134,7 +134,7 @@ export default function AviatorGame() {
         setPhase('crashed')
         setGameResult('loss')
         setWonAmount(betRef.current)
-        placeBetRef.current('aviator', betRef.current, -betRef.current)
+        adjustBalanceRef.current(-betRef.current)
         recordRound(cp)
         return
       }
@@ -176,7 +176,7 @@ export default function AviatorGame() {
     setPhase('cashedout')
     setGameResult('win')
     setWonAmount(win)
-    placeBetRef.current('aviator', betRef.current, win)
+    adjustBalanceRef.current(win)
     recordRound(crashPointRef.current)
     if (m >= BIG_WIN_MULT) setBigWin({ multiplier: m, amount: win })
   }
