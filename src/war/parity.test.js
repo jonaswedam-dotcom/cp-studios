@@ -30,9 +30,11 @@ test('bank income 50/level/hour matches buildings.js + 023', () => {
   assert.match(mig('023_war_tick.sql'), /lv \* 50/)
 })
 
-test('loot uses COIN_PER_STRENGTH (5) and 0.8 in 023', () => {
-  assert.equal(COIN_PER_STRENGTH, 5)
-  assert.match(mig('023_war_tick.sql'), /0\.8 \* def_raw \* 5/)
+test('loot uses COIN_PER_STRENGTH (15) in the live tick (038)', () => {
+  // Raised 5→15 in migration 038 (balance). 023's original `0.8 * def_raw * 5` is superseded.
+  assert.equal(COIN_PER_STRENGTH, 15)
+  assert.match(mig('038_war_balance.sql'), /0\.8 \* def_raw \* 15/)
+  assert.match(mig('023_war_tick.sql'), /0\.8 \* def_raw \* 5/) // historical original, now superseded
 })
 
 test('combat RNG band + retreat fraction match 026 tick', () => {
@@ -62,13 +64,13 @@ test('START_ARMY soldiers match war_spawn() in 028', () => {
   assert.match(mig('028_war_spawn.sql'), /true, 500, 0, 0, 0/)
 })
 
-// 036 is the LIVE war_tick() (last create-or-replace in apply order: 023→026→027→034→036).
+// 038 is the LIVE war_tick() (last create-or-replace in apply order: 023→026→027→034→036→038).
 // Guard the live copy directly so drift in the actually-running tick is caught.
-test('live tick (036) carries the combat + income constants', () => {
-  const sql = mig('036_war_ports_and_warship.sql')
+test('live tick (038) carries the combat + income constants', () => {
+  const sql = mig('038_war_balance.sql')
   assert.match(sql, /banklv\*50/)                    // bank income 50/level/hr
   assert.match(sql, /provinces\*10/)                 // per-province 10/hr
-  assert.match(sql, /0\.8 \* def_raw \* 5/)          // loot
+  assert.match(sql, /0\.8 \* def_raw \* 15/)         // loot (raised 5→15 in 038)
   assert.match(sql, /0\.85 \+ random\(\) \* 0\.30/)  // RNG band
   assert.match(sql, /\* 0\.25/)                      // attacker retreat
   assert.match(sql, /1 \+ 0\.5 \* def_bunker/)       // bunker +0.5/level

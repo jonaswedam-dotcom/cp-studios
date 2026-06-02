@@ -10,6 +10,6 @@ test('lootFraction scales with how much of the defender you destroyed, capped 0.
 })
 
 test('lootCoins multiplies fraction by defender strength and a coin rate', () => {
-  // defenderStrength 200, fraction 0.4, rate 5 -> 400
-  assert.equal(lootCoins(0.4, 200), 400)
+  // defenderStrength 200, fraction 0.4, COIN_PER_STRENGTH 15 -> 1200
+  assert.equal(lootCoins(0.4, 200), 1200)
 })

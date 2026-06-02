@@ -63,6 +63,7 @@ function WarGame() {
   const me = players.find((p) => p.user_id === userId) || null
   const myRegionRows = Object.values(regions).filter((r) => r.owner_id === userId)
   const myUnits = myRegionRows.reduce((s, r) => s + UNIT_TYPES.reduce((a, t) => a + (r[t] || 0), 0), 0)
+  const myStrength = myRegionRows.reduce((s, r) => s + UNIT_TYPES.reduce((a, t) => a + (r[t] || 0) * UNITS[t].strength, 0), 0)
   const eliminated = me && myRegionRows.length === 0
 
   const myBuildings    = buildings.filter((b) => b.owner_id === userId)
@@ -70,7 +71,7 @@ function WarGame() {
   const buildingsIn    = (regionId) => buildings.filter((b) => b.region_id === regionId)
   const myCostMult     = costMultiplier(myBuildings)
   const myStrengthMult = strengthMultiplier(myBuildings)
-  const myArmyMult     = armySizeMultiplier(myUnits)
+  const myArmyMult     = armySizeMultiplier(myStrength)
 
   const now = Date.now()
   const myRegionIds = new Set(myRegionRows.map((r) => r.region_id))
