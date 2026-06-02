@@ -92,6 +92,7 @@ export default function LiveBetFeed() {
         { event: 'INSERT', schema: 'public', table: 'game_history' },
         ({ new: row }) => {
           if (!row) return
+          if (row.result === 'push') return // pushes (ties) don't refresh the pill — wins & losses only
           const key = row.id ?? `${row.user_id}:${row.created_at ?? ''}`
           if (lastKeyRef.current === key) return // ignore duplicate delivery
           lastKeyRef.current = key
