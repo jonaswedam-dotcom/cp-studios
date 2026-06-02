@@ -111,7 +111,7 @@ function MessageBubble({ msg, isOwn, showName, onImageLoad }) {
 // ── ConversationThread (formerly ChatPanelBody) ────────────
 export default function ConversationThread({
   messages, hasLoaded, typingNames, imagePreview,
-  text, sending,
+  text, sending, sendError,
   onTextChange, onKeyDown, onSend, onImageFile, onClearImage, onMediaLoad,
   scrollRef, textareaRef, fileRef,
   userId,
@@ -167,6 +167,13 @@ export default function ConversationThread({
               <RemoveIcon />
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Send error (e.g. RLS approval gate rejection) */}
+      {sendError && (
+        <div className="flex-none px-3 pb-1">
+          <p className="text-[11px] text-red-400">{sendError}</p>
         </div>
       )}
 

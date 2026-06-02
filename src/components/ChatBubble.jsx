@@ -40,6 +40,7 @@ export default function ChatBubble() {
   const [imageFile,    setImageFile]    = useState(null)
   const [imagePreview, setImagePreview] = useState(null)
   const [sending,      setSending]      = useState(false)
+  const [sendError,    setSendError]    = useState(null)
   const [typingUsers,  setTypingUsers]  = useState({})
 
   // ── Tab + DM state ─────────────────────────────────────────
@@ -233,6 +234,7 @@ export default function ChatBubble() {
     setText(e.target.value)
     resizeTextarea(e.target)
     broadcastTyping()
+    if (sendError) setSendError(null)
   }
 
   // DM-specific text handler: resize + broadcast DM typing (NOT group typing)
@@ -262,6 +264,7 @@ export default function ChatBubble() {
     if (!trimmed && !imageFile) return
     if (sending) return
     setSending(true)
+    setSendError(null)
     try {
       let image_url = null
       if (imageFile) {
@@ -287,16 +290,25 @@ export default function ChatBubble() {
         })
         .select()
         .single()
-      if (!error && newMsg) {
-        setMessages(prev => prev.some(m => m.id === newMsg.id) ? prev : [...prev, newMsg])
-        requestAnimationFrame(() => scrollToBottom('smooth'))
-        localStorage.setItem(chatVisitKey(userId), new Date().toISOString())
+      if (error) {
+        // Don't silently drop the message: supabase-js returns the error here
+        // (it does NOT throw), so the old code cleared the input and showed
+        // nothing. Surface it and keep the text/image so the user can retry.
+        // Most common cause: the messages RLS approval gate (migration 017) —
+        // an account that isn't approved is rejected at insert.
+        console.error('Send failed:', error)
+        setSendError(error.message || 'Message failed to send.')
+        return
       }
+      setMessages(prev => prev.some(m => m.id === newMsg.id) ? prev : [...prev, newMsg])
+      requestAnimationFrame(() => scrollToBottom('smooth'))
+      localStorage.setItem(chatVisitKey(userId), new Date().toISOString())
       setText('')
       clearImage()
       if (textareaRef.current) textareaRef.current.style.height = 'auto'
     } catch (err) {
       console.error('Send failed:', err)
+      setSendError('Message failed to send.')
     } finally {
       setSending(false)
     }
@@ -322,6 +334,7 @@ export default function ChatBubble() {
     setActiveTab(tab)
     setText('')
     clearImage()
+    setSendError(null)
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
@@ -403,6 +416,7 @@ export default function ChatBubble() {
     imagePreview,
     text,
     sending,
+    sendError,
     onTextChange: handleTextChange,
     onKeyDown:    handleKeyDown,
     onSend:       handleSend,
