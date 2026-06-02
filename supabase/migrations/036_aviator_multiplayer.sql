@@ -289,7 +289,7 @@ DECLARE
   v_crash_at  timestamptz;
   v_iter      int;
 BEGIN
-  IF NOT pg_try_advisory_lock(hashtext('aviator-tick')::bigint) THEN
+  IF NOT pg_try_advisory_xact_lock(hashtext('aviator-tick')::bigint) THEN
     RETURN;
   END IF;
 
@@ -303,10 +303,19 @@ BEGIN
     END IF;
 
     -- 2. Transition waiting → flying (15-second betting window)
-    UPDATE public.aviator_rounds
-    SET    status = 'flying', started_at = now()
-    WHERE  status = 'waiting'
-      AND  created_at + interval '15 seconds' <= now();
+    -- Also re-anchor crash_at in secrets to the actual started_at so players
+    -- always get the correct flight duration regardless of tick timing lag.
+    WITH newly_flying AS (
+      UPDATE public.aviator_rounds
+      SET    status = 'flying', started_at = now()
+      WHERE  status = 'waiting'
+        AND  created_at + interval '15 seconds' <= now()
+      RETURNING id
+    )
+    UPDATE public.aviator_round_secrets s
+    SET    crash_at = now() + make_interval(secs := ln(GREATEST(s.crash_point, 1.001)) / 0.15)
+    FROM   newly_flying f
+    WHERE  s.round_id = f.id;
 
     -- 3. Transition flying → crashed when crash_at has passed
     SELECT ar.id, s.crash_point, s.crash_at
@@ -348,7 +357,6 @@ BEGIN
 
   END LOOP;
 
-  PERFORM pg_advisory_unlock(hashtext('aviator-tick')::bigint);
 END;
 $$;
 
