@@ -46,6 +46,23 @@ function distKm([lng1, lat1], [lng2, lat2]) {
 const ringCentroid = (r) => { let x = 0, y = 0; for (const [lng, lat] of r) { x += lng; y += lat } return [x / r.length, y / r.length] }
 const ringArea = (r) => { let a = 0; for (let i = 0; i < r.length - 1; i++) a += r[i][0] * r[i + 1][1] - r[i + 1][0] * r[i][1]; return Math.abs(a) / 2 }
 
+// All outer-ring vertices of a Polygon/MultiPolygon as [lng,lat] points.
+function boundaryPoints(geometry) {
+  const pts = []
+  for (const poly of polysOf(geometry)) for (const pt of poly[0]) pts.push(pt)
+  return pts
+}
+// Axis-aligned bbox [minX,minY,maxX,maxY] of a point list (reuse bboxOf for geoms).
+function pointsBbox(pts) {
+  let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity
+  for (const [x, y] of pts) { if (x < a) a = x; if (y < b) b = y; if (x > c) c = x; if (y > d) d = y }
+  return [a, b, c, d]
+}
+// Cheap lng/lat-degree padding for an ~EPS_KM proximity test near the equator/mid-latitudes.
+// 1 deg lat ~= 111km; we pad generously and confirm with true haversine distKm below.
+const ADJ_EPS_KM  = 40   // border counts as "touching" if boundary vertices come within this
+const ADJ_PAD_DEG = 0.6  // bbox pre-filter padding (~66km); must comfortably exceed ADJ_EPS_KM
+
 // Average of the largest ring's vertices — good enough for split point + marker placement.
 function centroid(geometry) {
   let best = null, bestLen = -1
@@ -214,6 +231,33 @@ function intraNeighbors(rid) {
   return (QUAD_ADJ[q] || []).map((qq) => `${base}_${qq}`).filter((id) => meta[id])
 }
 
+// ── Proximity adjacency (Fix A) ──────────────────────────────────────────────
+// TopoJSON shared-arc neighbours miss most international borders because each country is
+// clipped to its OWN quadrant rectangles, so a shared border is cut at different points per
+// country and no longer forms an identical arc. Repair it: any two quarters from DIFFERENT
+// countries whose clipped boundaries come within ADJ_EPS_KM are land-adjacent.
+const featById = new Map()
+simplified.features.forEach((f, i) => featById.set(ids[i], { pts: boundaryPoints(f.geometry) }))
+for (const [id, v] of featById) { v.bbox = pointsBbox(v.pts) }
+const countryOf = (rid) => (meta[rid]?.country || '')
+const proxNbrs = new Map(ids.map((id) => [id, new Set()]))
+const bboxesNear = (A, B) =>
+  A[0] - ADJ_PAD_DEG <= B[2] && B[0] - ADJ_PAD_DEG <= A[2] &&
+  A[1] - ADJ_PAD_DEG <= B[3] && B[1] - ADJ_PAD_DEG <= A[3]
+for (let i = 0; i < ids.length; i++) {
+  const a = featById.get(ids[i])
+  for (let j = i + 1; j < ids.length; j++) {
+    if (countryOf(ids[i]) === countryOf(ids[j])) continue       // siblings handled by intraNeighbors
+    const b = featById.get(ids[j])
+    if (!bboxesNear(a.bbox, b.bbox)) continue                    // cheap reject
+    let touch = false
+    outer: for (const pa of a.pts) for (const pb of b.pts) {
+      if (distKm(pa, pb) <= ADJ_EPS_KM) { touch = true; break outer }
+    }
+    if (touch) { proxNbrs.get(ids[i]).add(ids[j]); proxNbrs.get(ids[j]).add(ids[i]) }
+  }
+}
+
 const regions = {}
 simplified.features.forEach((f, i) => {
   const rid = ids[i]
@@ -221,7 +265,7 @@ simplified.features.forEach((f, i) => {
   const country = m.country || ''
   const city = cityByRegion.get(rid)?.name
   const name = city || `${country} ${m.q}`.trim()
-  const neigh = new Set([...nbrs[i].map((j) => ids[j]), ...intraNeighbors(rid)])
+  const neigh = new Set([...nbrs[i].map((j) => ids[j]), ...intraNeighbors(rid), ...proxNbrs.get(rid)])
   neigh.delete(rid)
   regions[rid] = {
     name,
@@ -239,4 +283,14 @@ mkdirSync('public/war', { recursive: true })
 writeFileSync('public/war/provinces.json', JSON.stringify({ regions }))
 writeFileSync('public/war/provinces.topojson', JSON.stringify(topo))
 const nCoastal = Object.values(regions).filter((r) => r.coastal).length
-console.log(`Wrote ${Object.keys(regions).length} country-quarter regions from ${usedCode.size} countries (${nCoastal} coastal).`)
+const ridsArr = Object.keys(regions)
+const zeroCross = ridsArr.filter((rid) => {
+  const nb = (regions[rid].neighbors || []).filter((n) => regions[n])
+  return !nb.some((n) => regions[n].country !== regions[rid].country)
+}).length
+// connected components
+const comp = new Map(); let cn = 0
+for (const rid of ridsArr) { if (comp.has(rid)) continue; const c = cn++, st = [rid]; comp.set(rid, c)
+  while (st.length) { const x = st.pop(); for (const y of (regions[x].neighbors || [])) if (regions[y] && !comp.has(y)) { comp.set(y, c); st.push(y) } } }
+console.log(`Wrote ${ridsArr.length} country-quarter regions from ${usedCode.size} countries (${nCoastal} coastal).`)
+console.log(`Adjacency: ${zeroCross} quarters with zero cross-border neighbour, ${cn} connected components.`)
