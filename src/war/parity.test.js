@@ -8,7 +8,9 @@ import { dirname, join } from 'node:path'
 import { UNITS, START_ARMY } from './units.js'
 import { COIN_PER_STRENGTH } from './spoils.js'
 import { INCOME_PER_BANK_LEVEL_PER_HOUR, INCOME_PER_PROVINCE_PER_HOUR,
-  defenseMultiplier, antiAirFactor, strengthMultiplier } from './buildings.js'
+  defenseMultiplier, antiAirFactor, strengthMultiplier,
+  SLOTS_PER_REGION, buildingCost } from './buildings.js'
+import { armySizeMultiplier } from './economy.js'
 import { RETREAT_FRACTION, RNG_MIN, RNG_SPAN } from './combat.js'
 import { neutralGarrison } from './neutral.js'
 
@@ -102,4 +104,63 @@ test('neutral garrison hash matches war_neutral_soldiers() in 023', () => {
   const g = neutralGarrison('FR1').soldier
   assert.ok(g >= 50 && g <= 300)
   assert.match(mig('023_war_tick.sql'), /50 \+ \(h % 251\)/)
+})
+
+// ── Server-authoritative war economy (migrations 052/053) ───────────────────
+// 052 moves unit/building purchases server-side (DEFINER RPCs). The cost math it
+// embeds MUST match the client formulas in economy.js / units.js / buildings.js,
+// or a player's displayed price won't match what they're charged. 053 then revokes
+// the direct client writes those RPCs replace.
+
+test('war_buy_units (052) embeds unit costs matching units.js', () => {
+  assert.equal(UNITS.soldier.cost, 100)
+  assert.equal(UNITS.tank.cost, 400)
+  assert.equal(UNITS.jet.cost, 800)
+  assert.equal(UNITS.warship.cost, 4000)
+  const sql = mig('052_war_server_authoritative.sql')
+  assert.match(sql, /when 'soldier' then 100/)
+  assert.match(sql, /when 'tank' then 400/)
+  assert.match(sql, /when 'jet' then 800/)
+  assert.match(sql, /when 'warship' then 4000/)
+})
+
+test('war_buy_units (052) army-size surcharge + factory discount match economy.js/buildings.js', () => {
+  // armySizeMultiplier(strength) = 1 + 0.25 * floor(strength / 2500)
+  assert.equal(armySizeMultiplier(0), 1)
+  assert.equal(armySizeMultiplier(2500), 1.25)
+  assert.equal(armySizeMultiplier(5200), 1.5)
+  // costMultiplier(factory) = max(0.5, 1 - 0.1 * factoryLevels)
+  const sql = mig('052_war_server_authoritative.sql')
+  assert.match(sql, /1 \+ 0\.25 \* floor\([^/]*\/ 2500\)/)
+  assert.match(sql, /greatest\(0\.5, 1 - 0\.1 \*/)
+  // army strength sum must weight warship at 20 (matches 036 / units.js)
+  assert.equal(UNITS.warship.strength, 20)
+  assert.match(sql, /warship \* 20/)
+})
+
+test('war_build/war_upgrade (052) building costs match buildings.js arrays', () => {
+  assert.deepEqual([buildingCost('bunker', 0), buildingCost('bunker', 1), buildingCost('bunker', 2)], [800, 1600, 3200])
+  assert.deepEqual([buildingCost('antiair', 0), buildingCost('antiair', 1), buildingCost('antiair', 2)], [1000, 2000, 4000])
+  assert.deepEqual([buildingCost('factory', 0), buildingCost('factory', 1), buildingCost('factory', 2)], [1500, 3000, 6000])
+  assert.deepEqual([buildingCost('lab', 0), buildingCost('lab', 1), buildingCost('lab', 2)], [1500, 3000, 6000])
+  assert.deepEqual([buildingCost('bank', 0), buildingCost('bank', 1), buildingCost('bank', 2)], [1200, 2400, 4800])
+  assert.equal(buildingCost('port', 0), 2500)
+  const sql = mig('052_war_server_authoritative.sql')
+  assert.match(sql, /array\[800,1600,3200\]/)
+  assert.match(sql, /array\[1000,2000,4000\]/)
+  assert.match(sql, /array\[1500,3000,6000\]/)
+  assert.match(sql, /array\[1200,2400,4800\]/)
+  assert.match(sql, /array\[2500\]/)
+})
+
+test('war_build (052) enforces SLOTS_PER_REGION building cap', () => {
+  assert.equal(SLOTS_PER_REGION, 3)
+  assert.match(mig('052_war_server_authoritative.sql'), />= 3/)
+})
+
+test('lockdown (053) revokes client write on war_regions/buildings/movements', () => {
+  const sql = mig('053_war_write_lockdown.sql')
+  assert.match(sql, /revoke[^;]*update[^;]*on\s+public\.war_regions\s+from[^;]*authenticated/i)
+  assert.match(sql, /revoke[^;]*on\s+public\.war_buildings\s+from[^;]*authenticated/i)
+  assert.match(sql, /revoke[^;]*on\s+public\.war_movements\s+from[^;]*authenticated/i)
 })

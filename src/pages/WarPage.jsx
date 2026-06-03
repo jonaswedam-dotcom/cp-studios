@@ -12,7 +12,6 @@ import BuildingsModal from '../war/BuildingsModal.jsx'
 import { UNITS, UNIT_TYPES, formatDuration } from '../war/units.js'
 import { describeEvent } from '../war/events.js'
 import { troopCost, armySizeMultiplier } from '../war/economy.js'
-import { emptyStack } from '../war/combat.js'
 import { BUILDINGS, costMultiplier, strengthMultiplier, buildingCost, SLOTS_PER_REGION, INCOME_PER_BANK_LEVEL_PER_HOUR, INCOME_PER_PROVINCE_PER_HOUR } from '../war/buildings.js'
 import { validateMove } from '../war/movement.js'
 import { computeTargets, sourcesForDest } from '../war/targeting.js'
@@ -46,7 +45,7 @@ function WarComingSoon() {
 
 function WarGame() {
   const { session } = useApp()
-  const { balance, adjustBalance, loadBalance } = useCasino()
+  const { balance, loadBalance } = useCasino()
   const userId   = session?.user?.id
   const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || 'Player'
 
@@ -127,7 +126,7 @@ function WarGame() {
     })()
   }, [loading, graph, userId, me, regions, players, userName])
 
-  // ── Buy units (deploy onto HQ region) ───────────────────────────────────────
+  // ── Buy units (server-authoritative: war_buy_units validates + debits + deploys) ──
   const handleBuy = useCallback(async (type, count) => {
     if (busy || !me) return
     setBusy(true)
@@ -135,44 +134,35 @@ function WarGame() {
       const cost = troopCost(type, count, myCostMult, myArmyMult)
       if ((balance ?? 0) < cost) { showFlash('Not enough coins.'); return }
 
-      // Port-gated units (warships) deploy to a Port you own — never a land-locked HQ.
+      // Pick the destination province; the RPC re-validates ownership / port / respawn.
+      //   warship → a Port you own; respawn (no land) → a random unclaimed spawn; else HQ.
+      let target, respawn = false
       if (UNITS[type].requiresPort) {
         const portRow = myRegionRows.find((r) => myBuildings.some((b) => b.region_id === r.region_id && b.type === 'port'))
         if (!portRow) { showFlash('Build a Port first — warships launch from your port.'); return }
-        const { error: pErr } = await supabase.from('war_regions')
-          .update({ [type]: (portRow[type] || 0) + count, updated_at: new Date().toISOString() })
-          .eq('region_id', portRow.region_id)
-        if (pErr) { showFlash(`Purchase failed: ${pErr.message || pErr.code || 'unknown error'}`); return }
-        await adjustBalance(-cost)
-        showFlash(`+${count} ${UNITS[type].label}${count > 1 ? 's' : ''} at ${graph.regions[portRow.region_id]?.city || portRow.region_id}`)
-        return
-      }
-
-      let target = myRegionRows.find((r) => r.is_hq) || myRegionRows[0]
-      if (!target) {
-        const claimed = new Set(Object.keys(regions))
-        const spawn = pickRandomSpawn(graph, claimed, Math.random)
+        target = portRow.region_id
+      } else if (myRegionRows.length === 0) {
+        const spawn = pickRandomSpawn(graph, new Set(Object.keys(regions)), Math.random)
         if (!spawn) { showFlash('No room to respawn.'); return }
-        const { error: upErr } = await supabase.from('war_regions').upsert({
-          region_id: spawn, owner_id: userId, owner_name: me.display_name, color: me.color,
-          is_hq: true, ...emptyStack(), [type]: count,
-        }, { onConflict: 'region_id' })
-        if (upErr) { showFlash('Respawn failed.'); return }
-        await adjustBalance(-cost)
-        await supabase.from('war_players').update({ spawn_region: spawn }).eq('user_id', userId)
-        showFlash(`Respawned in ${graph.regions[spawn]?.city || spawn}!`)
-        return
+        target = spawn; respawn = true
+      } else {
+        target = (myRegionRows.find((r) => r.is_hq) || myRegionRows[0]).region_id
       }
-      const { error: upErr } = await supabase.from('war_regions')
-        .update({ [type]: (target[type] || 0) + count, updated_at: new Date().toISOString() })
-        .eq('region_id', target.region_id)
-      if (upErr) { showFlash('Purchase failed.'); return }
-      await adjustBalance(-cost)
-      showFlash(`+${count} ${UNITS[type].label}${count > 1 ? 's' : ''}`)
-    } finally { setShowBuy(false); setBusy(false) }
-  }, [busy, me, balance, myRegionRows, myBuildings, regions, graph, userId, adjustBalance, myCostMult, myArmyMult])
 
-  // ── Send a movement ─────────────────────────────────────────────────────────
+      const { error } = await supabase.rpc('war_buy_units', { p_region: target, p_type: type, p_count: count })
+      if (error) { showFlash(`Purchase failed: ${error.message || 'unknown error'}`); return }
+      loadBalance()
+      showFlash(respawn
+        ? `Respawned in ${graph.regions[target]?.city || target}!`
+        : `+${count} ${UNITS[type].label}${count > 1 ? 's' : ''}`)
+    } finally { setShowBuy(false); setBusy(false) }
+  }, [busy, me, balance, myRegionRows, myBuildings, regions, graph, loadBalance, myCostMult, myArmyMult])
+
+  // ── Send a movement (server-authoritative: war_send_units debits the source) ──
+  // The source debit + reinforce/queue all happen atomically server-side, so a force
+  // can no longer be fabricated (the old forged-movement conquest exploit). The client
+  // still validates range/mode for instant UX feedback; the RPC re-checks ownership +
+  // unit availability and floors the arrival time.
   const handleMove = useCallback(async ({ from, dest, stack }) => {
     if (busy || !from) return
     setBusy(true)
@@ -187,33 +177,15 @@ function WarGame() {
       const destShielded = !isReinforce && destRow?.owner_id &&
         players.some((p) => p.user_id === destRow.owner_id && p.shield_until && new Date(p.shield_until) > new Date())
       if (destShielded) { showFlash("That player is shielded — you can't attack yet."); return }
-      const decStack = {}; for (const t of UNIT_TYPES) decStack[t] = (src[t] || 0) - (stack[t] || 0)
-      const rollbackSrc = () => supabase.from('war_regions')
-        .update({ ...Object.fromEntries(UNIT_TYPES.map((t) => [t, src[t] || 0])), updated_at: new Date().toISOString() })
-        .eq('region_id', from)
 
-      // Within your own territory, reinforcing is instant: shift the stack straight from
-      // source to destination (both are yours, so RLS lets the client write them directly,
-      // same trust level as buying units) — no travel leg, no waiting for the server tick.
-      if (isReinforce) {
-        const { error: decErr } = await supabase.from('war_regions').update({ ...decStack, updated_at: new Date().toISOString() }).eq('region_id', from)
-        if (decErr) { showFlash('Move failed.'); return }
-        const incStack = {}; for (const t of UNIT_TYPES) incStack[t] = (destRow[t] || 0) + (stack[t] || 0)
-        const { error: incErr } = await supabase.from('war_regions').update({ ...incStack, updated_at: new Date().toISOString() }).eq('region_id', dest)
-        if (incErr) { await rollbackSrc(); showFlash('Move failed.'); return }
-        showFlash(`Reinforced ${graph.regions[dest]?.city || dest}.`)
-        return
-      }
-
-      // Attack / take: the force travels and resolves server-side (war_tick) on arrival.
-      const arrivesAt = new Date(Date.now() + v.arrivesInSeconds * 1000).toISOString()
-      const { error: decErr } = await supabase.from('war_regions').update({ ...decStack, updated_at: new Date().toISOString() }).eq('region_id', from)
-      if (decErr) { showFlash('Move failed.'); return }
-      const { error: mvErr } = await supabase.from('war_movements').insert({
-        player_id: userId, from_region: from, to_region: dest, units: stack, mode: v.mode, arrives_at: arrivesAt,
+      const arrivesAt = isReinforce ? null : new Date(Date.now() + v.arrivesInSeconds * 1000).toISOString()
+      const { error } = await supabase.rpc('war_send_units', {
+        p_from: from, p_to: dest, p_units: stack, p_mode: v.mode, p_arrives_at: arrivesAt,
       })
-      if (mvErr) { await rollbackSrc(); showFlash('Move failed.'); return }
-      showFlash(`Force en route — arrives in ${formatDuration(v.arrivesInSeconds)}`)
+      if (error) { showFlash(`Move failed: ${error.message || 'unknown error'}`); return }
+      showFlash(isReinforce
+        ? `Reinforced ${graph.regions[dest]?.city || dest}.`
+        : `Force en route — arrives in ${formatDuration(v.arrivesInSeconds)}`)
     } finally { setSendTo(null); setSendSources([]); setBusy(false) }
   }, [busy, regions, userId, players, graph])
 
@@ -227,12 +199,12 @@ function WarGame() {
       const cost = buildingCost(type, 0)
       if ((balance ?? 0) < cost) { showFlash('Not enough coins.'); return }
       if (buildingsIn(buildFor).length >= SLOTS_PER_REGION) { showFlash('No slots left.'); return }
-      const { error } = await supabase.from('war_buildings').insert({ region_id: buildFor, owner_id: userId, type, level: 1 })
-      if (error) { showFlash(`Build failed: ${error.message || error.code || 'unknown error'}`); return }
-      await adjustBalance(-cost)
+      const { error } = await supabase.rpc('war_build', { p_region: buildFor, p_type: type })
+      if (error) { showFlash(`Build failed: ${error.message || 'unknown error'}`); return }
+      loadBalance()
       showFlash(`Built ${BUILDINGS[type]?.label || type}.`)
     } finally { setBusy(false) }
-  }, [busy, buildFor, balance, buildings, regions, graph, userId, adjustBalance])
+  }, [busy, buildFor, balance, buildings, regions, graph, userId, loadBalance])
 
   const handleUpgrade = useCallback(async (b) => {
     if (busy) return
@@ -242,12 +214,12 @@ function WarGame() {
       const cost = buildingCost(b.type, b.level)
       if (cost === Infinity) { showFlash('Already max level.'); return }
       if ((balance ?? 0) < cost) { showFlash('Not enough coins.'); return }
-      const { error } = await supabase.from('war_buildings').update({ level: b.level + 1 }).eq('id', b.id)
-      if (error) { showFlash('Upgrade failed.'); return }
-      await adjustBalance(-cost)
+      const { error } = await supabase.rpc('war_upgrade', { p_building_id: b.id })
+      if (error) { showFlash(`Upgrade failed: ${error.message || 'unknown error'}`); return }
+      loadBalance()
       showFlash(`Upgraded ${b.type} to Lv ${b.level + 1}.`)
     } finally { setBusy(false) }
-  }, [busy, buildFor, balance, regions, userId, adjustBalance])
+  }, [busy, buildFor, balance, regions, userId, loadBalance])
 
   // ── Collect accrued income into the wallet on load + every 60s (also stamps activity) ──
   // Combat + movement resolution is now server-authoritative (the pg_cron war_tick()).
