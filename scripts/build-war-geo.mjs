@@ -60,6 +60,13 @@ function pointsBbox(pts) {
 }
 // Cheap lng/lat-degree padding for an ~EPS_KM proximity test near the equator/mid-latitudes.
 // 1 deg lat ~= 111km; we pad generously and confirm with true haversine distKm below.
+// Known trade-offs of the 40km threshold (acceptable for this casual game):
+//  • Narrow sea straits under ~40km (Øresund, Gibraltar, Dover, Palk Strait, Bab-el-Mandeb,
+//    France↔Jersey/UK …) become land-passable. Genuine open-ocean islands (Japan, Iceland,
+//    Fiji, Madagascar, NZ — all >40km of sea) correctly stay isolated, so ships/jets are still
+//    required for real crossings. Lowering below ~25km re-fragments real land borders.
+//  • True hole-enclaves (Lesotho in South Africa, Baikonur in Kazakhstan) stay unlinked because
+//    clipToRect drops polygon holes, so the enclosing country has no boundary facing them.
 const ADJ_EPS_KM  = 40   // border counts as "touching" if boundary vertices come within this
 const ADJ_PAD_DEG = 0.6  // bbox pre-filter padding (~66km); must comfortably exceed ADJ_EPS_KM
 
