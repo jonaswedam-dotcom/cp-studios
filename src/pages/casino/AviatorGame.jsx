@@ -86,8 +86,6 @@ export default function AviatorGame() {
   const settledRef     = useRef(false)
   const autoSettleRef  = useRef(null)
   const betRef         = useRef(bet)
-  const multTextRef    = useRef(null)
-  const multSubRef     = useRef(null)
 
   useEffect(() => { betRef.current = bet }, [bet])
   useEffect(() => () => {
@@ -112,8 +110,6 @@ export default function AviatorGame() {
       const elapsed = (performance.now() - startTimeRef.current) / 1000
       const m = multiplierForElapsed(elapsed)
       multiplierRef.current = m
-      if (multTextRef.current) multTextRef.current.textContent = `${+m.toFixed(2)}×`
-      if (multSubRef.current)  multSubRef.current.textContent  = formatCoins(Math.floor(betRef.current * (m - 1)))
       setMultiplier(+m.toFixed(2))
       rafRef.current = requestAnimationFrame(tick)
     }
@@ -248,7 +244,6 @@ export default function AviatorGame() {
           {/* Multiplier — above the board, always left-aligned, never clipped */}
           <div style={{ paddingBottom: 8, paddingLeft: 4 }}>
             <div
-              ref={multTextRef}
               style={{
                 fontFamily: '"Playfair Display", Georgia, serif',
                 fontWeight: 800,
@@ -268,9 +263,7 @@ export default function AviatorGame() {
             {isFlying && (
               <div style={{ fontSize: 12, color: '#a8a29e', marginTop: 4 }}>
                 Bet {bet} · cash out for{' '}
-                <b style={{ color: '#fcd34d' }}>
-                  <span ref={multSubRef}>{formatCoins(liveWin)}</span>
-                </b>
+                <b style={{ color: '#fcd34d' }}>{formatCoins(liveWin)}</b>
               </div>
             )}
           </div>
