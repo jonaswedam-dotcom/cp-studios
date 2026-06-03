@@ -10,6 +10,7 @@ const AIR = UNITS.jet.airRangeKm
 const SEA = UNITS.warship.seaRangeKm
 const LAND = UNITS.soldier.landRangeKm
 const SEA_EXPAND_BADGES = 12 // most coastal neutrals a fleet badges at once (keeps the map readable)
+const LAND_EXPAND_BADGES = 16 // nearest unclaimed same-landmass quarters a land army badges (map readability)
 
 const landUnits = (r) => (r?.soldier || 0) + (r?.tank || 0)
 
@@ -112,6 +113,29 @@ export function computeTargets(regions, graph, { userId, shieldedOwnerIds = new 
     }
     seaCands.sort((a, b) => a.km - b.km)
     for (const c of seaCands.slice(0, SEA_EXPAND_BADGES)) consider(c.id)
+  }
+
+  // Land expansion: badge the nearest UNCLAIMED quarters reachable by land (same landmass,
+  // within land range) so a soldiers-only player always sees somewhere to march — mirroring the
+  // sea-expansion badges above. Distant neutrals stay clickable via sourcesForDest regardless.
+  const landArmyTiles = owned.filter((s) => landUnits(s) > 0)
+  if (landArmyTiles.length) {
+    const reach = new Set()
+    for (const s of landArmyTiles) for (const id of landReachable(s.region_id, graph, landRangeKm)) reach.add(id)
+    const landCands = []
+    for (const id of reach) {
+      if (kinds.has(id) || regions[id]?.owner_id) continue // already badged, or claimed (handled above)
+      const cc = graph.regions[id]?.centroid
+      if (!cc) continue
+      let nearest = Infinity
+      for (const s of landArmyTiles) {
+        const sc = graph.regions[s.region_id]?.centroid
+        if (sc) nearest = Math.min(nearest, distanceKm(sc, cc))
+      }
+      landCands.push({ id, km: nearest })
+    }
+    landCands.sort((a, b) => a.km - b.km)
+    for (const c of landCands.slice(0, LAND_EXPAND_BADGES)) consider(c.id)
   }
 
   return [...kinds].map(([id, kind]) => ({ id, kind }))

@@ -163,3 +163,18 @@ test('computeTargets badges a nearby same-landmass enemy as attack for a soldier
   assert.equal(k.FOE, 'attack')   // reachable by land within range
   assert.equal(k.ISLE, undefined) // open sea between — not land-reachable, no jets/ships
 })
+
+// A neutral (unclaimed) country on the same landmass within land range must GLOW as expand,
+// not just be a blind click — otherwise soldiers-only players think they can't invade. FOE is
+// NOT a direct neighbour of the only owned tile (HOME→LINK is the only edge), so today FOE is
+// invisible; the land-expand pass must surface it via the same-landmass land-reach fallback.
+test('computeTargets badges a nearby same-landmass NEUTRAL (non-neighbour) as expand for a soldiers-only player', () => {
+  const reg = {
+    HOME: { region_id: 'HOME', owner_id: 'me', soldier: 100, tank: 0, jet: 0, warship: 0 },
+    // LINK/FOE/ISLE have no rows -> unclaimed neutral garrisons.
+  }
+  const k = kindOf(computeTargets(reg, LANDMASS_G, OPTS))
+  assert.equal(k.LINK, 'expand')  // direct neighbour neutral -> glows (already did)
+  assert.equal(k.FOE, 'expand')   // same landmass, within land range, unclaimed, NOT a neighbour -> must glow
+  assert.equal(k.ISLE, undefined) // different landmass (open sea) -> still needs a warship
+})
