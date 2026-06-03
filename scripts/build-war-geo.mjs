@@ -10,8 +10,9 @@ import { topology } from 'topojson-server'
 import { feature, neighbors, quantize } from 'topojson-client'
 import { presimplify, simplify, quantile } from 'topojson-simplify'
 
-const ADMIN0 = 'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_0_countries.geojson'
-const PLACES = 'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_populated_places.geojson'
+const NE_REF  = 'ca96624a56bd078437bca8184e78163e5039ad19' // pinned Natural Earth commit for reproducible map builds
+const ADMIN0 = `https://raw.githubusercontent.com/nvkelso/natural-earth-vector/${NE_REF}/geojson/ne_10m_admin_0_countries.geojson`
+const PLACES = `https://raw.githubusercontent.com/nvkelso/natural-earth-vector/${NE_REF}/geojson/ne_10m_populated_places.geojson`
 
 const QUANTIZE    = 1e4    // coordinate grid (~tens of metres at world scale)
 const REMOVE_PCT  = 0.55   // drop this fraction of lowest-weight points during simplification
