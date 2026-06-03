@@ -48,8 +48,8 @@ declare
   v_factory   integer;
   v_army_mult numeric;
   v_cost_mult numeric;
-  v_cost      integer;
-  v_owned     integer;
+  v_cost      numeric;   -- numeric (not int): absurd orders overflow int4; balance>=v_cost
+  v_owned     integer;    -- then keeps the affordable subtraction in range. See test B / 056.
   v_balance   integer;
   v_name      text;
   v_color     text;
@@ -71,7 +71,7 @@ begin
   select coalesce(sum(level), 0) into v_factory from public.war_buildings where owner_id = uid and type = 'factory';
   v_cost_mult := greatest(0.5, 1 - 0.1 * v_factory);
 
-  v_cost := round((v_unit_cost::numeric * p_count) * v_cost_mult * v_army_mult)::int;
+  v_cost := round((v_unit_cost::numeric * p_count) * v_cost_mult * v_army_mult);
 
   select count(*) into v_owned from public.war_regions where owner_id = uid;
 

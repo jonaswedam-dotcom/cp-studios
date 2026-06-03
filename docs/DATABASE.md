@@ -334,8 +334,12 @@ back-income.
 SECURITY DEFINER; granted to `authenticated`. Atomically creates the `war_players` row and
 the spawn province in `war_regions` (500 soldiers, `is_hq = true`), and sets `shield_until =
 now() + 48h`. Idempotent: if the player already has a `spawn_region`, returns it immediately
-without re-inserting. Raises `'region taken'` if the chosen province already has an owner.
-Clients call `supabase.rpc('war_spawn', ...)` instead of a direct insert.
+without re-inserting. **As of migration `055` the spawn location is server-chosen at random:**
+`p_region`/`p_country` are ignored and the server draws a random unclaimed region from the
+`war_region_pool` table (the seeded 1027-region universe), raising `'world full'` if none are
+free. This closes the "place yourself anywhere" exploit (previously the client picked the
+region and the server only checked it was unclaimed). Clients still call
+`supabase.rpc('war_spawn', ...)` instead of a direct insert.
 
 **Column lockdown (`028`):** `INSERT` and broad `UPDATE` are revoked from `authenticated` on
 `war_players`; only `UPDATE (display_name, color, spawn_region)` is granted back. This means
@@ -465,11 +469,13 @@ Return columns: `user_id`, `full_name`, `avatar_url`. Reads `auth.users` and `pe
 
 ### `war_spawn(p_region text, p_country text, p_color text, p_name text) → text`  (migration `028`)
 Creates a new CP War player and their spawn province atomically. Idempotent: returns the
-existing `spawn_region` if the player is already enrolled. Raises `'region taken'` if the
-target province already has an owner. Sets `shield_until = now() + 48h` on the new player row.
-Returns the spawn `region_id`. Granted to `authenticated`; runs `SECURITY DEFINER` so it can
-bypass the column-level revoke on `war_players` (clients may no longer insert directly or set
-`shield_until`).
+existing `spawn_region` if the player is already enrolled. As of migration `055` the spawn
+region is **server-chosen at random** from the unclaimed `war_region_pool` — the client-supplied
+`p_region`/`p_country` are ignored, and it raises `'world full'` when no region is free (this is
+the fix for the "place yourself anywhere" exploit). Sets `shield_until = now() + 48h` on the new
+player row. Returns the spawn `region_id`. Granted to `authenticated`; runs `SECURITY DEFINER`
+so it can bypass the column-level revoke on `war_players` (clients may no longer insert directly
+or set `shield_until`).
 
 ---
 
@@ -515,6 +521,32 @@ The migration history records several real bugs worth remembering:
 
 ---
 
+### CP War — server-authoritative economy (migrations `052`/`053`)
+
+Closes the client-authoritative war economy (free army / forged conquest / free buildings).
+All unit/building acquisition and force movement now flow through `SECURITY DEFINER` RPCs that
+compute price, debit the wallet/units, and validate ownership server-side. Constants mirror
+`src/war/{units,economy,buildings}.js` and are guarded by `src/war/parity.test.js`.
+
+- **`war_buy_units(p_region, p_type, p_count) → jsonb`** — prices the order server-side
+  (`unit cost × count × factory discount × army-size surcharge`), debits the wallet atomically
+  (rejects if too poor), and adds the units to a province you own (or, when you hold none,
+  respawns you — region chosen server-side once `055` is applied). Warships require a `port` in
+  the target province.
+- **`war_send_units(p_from, p_to, p_units, p_mode, p_arrives_at) → jsonb`** — validates source
+  ownership + unit availability and **debits the source province** (so a movement's force can no
+  longer be fabricated). Own→own is an instant reinforce; otherwise a movement row is queued for
+  `war_tick`, with `arrives_at` floored to the mode's minimum travel time (no instant resolution).
+- **`war_build(p_region, p_type) → jsonb`** / **`war_upgrade(p_building_id) → jsonb`** —
+  server-priced (`war_building_cost()`), slot-capped (`SLOTS_PER_REGION = 3`), one-of-each-type
+  (`029` unique). Coastal-only gating for ports stays client-side (the graph isn't in the DB).
+
+All four are granted to `authenticated` and run as the table owner, so they keep working after
+the **`053` lockdown** revokes client `INSERT`/`UPDATE` on `war_regions`/`war_buildings`/
+`war_movements`. Apply order (like `044`-before-`045`): `052` → deploy the RPC client → `053`.
+
+---
+
 ## Security limitations & known gaps
 
 A security review (2026-05) of the RLS policies and the client auth flow found the gaps below.
@@ -534,7 +566,7 @@ behaviour and would need fixing before this app could be exposed to untrusted us
 | 8 | **Low** | **Login ignores the `pending_users` query error.** It destructures only `data`, so a transient query failure is treated as "pending" and signs the user out. Fails closed (not a hole) but can cause spurious lockouts. | `AppContext.jsx:97–101` | Handle the `error` branch explicitly. |
 | — | *Accepted* | **Hardcoded admin email** as the sole admin authority, duplicated in the client and ~6 RLS policies. Relies on the verified JWT `email` claim; fragile to maintain. | `AppContext.jsx:7`; `001`/`002` policies | (Accepted.) Optionally move to a roles table / custom claim referenced by both client and RLS. |
 | — | *Accepted* | **Casino is not server-authoritative** — game outcomes/balances are computed client-side and written to `wallets` directly. Coin transfers are the safe exception (`donate_coins` RPC). | `CasinoContext.jsx`; `005`/`007` | (Accepted for play-money.) Move game resolution into Postgres functions/Edge Functions if balances ever need to be tamper-proof. |
-| — | *Accepted* | **CP War combat *inputs* are client-trusted.** Combat/conquest/income resolution is server-authoritative (`war_tick()`), and clients can no longer write enemy rows. But `war_movements` rows are still inserted client-side, and a player can set their own province's unit counts directly (owner-only RLS), so a determined member could field a fabricated army or send from/to provinces the client-side reachability rules would forbid (the tick doesn't re-validate adjacency/range) — equivalent to the accepted casino self-editing trust (§4). `count > 0` is enforced; building writes are region-owner-bound; `war_tick` is not client-executable. | `WarPage.jsx`; `019`/`023`/`024` | (Accepted for friends-and-family.) Add a `send_units()` `SECURITY DEFINER` RPC that validates source ownership + unit balance and debits atomically; make own-region unit counts server-written. |
+| ✓ | **Fixed (`052`/`053`)** | **CP War economy is now server-authoritative.** Previously a player could set their own province's unit counts directly, `INSERT` a fabricated `war_movements` stack, and create/upgrade buildings for free (owner-only RLS) — the coin cost was deducted by a *separate* client call with no server-side link — so any signed-in user could field a free unlimited army, conquer anyone with a phantom force, or mint coins via free banks (re-opening the `045` wallet mint through income). **Closed:** purchases/movements now go through `SECURITY DEFINER` RPCs (`war_buy_units`/`war_send_units`/`war_build`/`war_upgrade`, migration `052`) that price + debit + validate ownership server-side and debit the *source* province on a send; migration `053` revokes client `INSERT`/`UPDATE` on `war_regions`/`war_buildings`/`war_movements`. **Residual (low):** exact travel time + range/adjacency stay client-validated (the province graph isn't in the DB) — a real, *paid* army is still required and only one region falls per attack. | `WarPage.jsx`; `052`/`053` | Done. (A future step could put the province graph in the DB to make range server-authoritative too.) |
 
 ---
 
@@ -575,3 +607,7 @@ behaviour and would need fixing before this app could be exposed to untrusted us
 | `031_ad_rewards.sql`                   | Rewarded-ad faucet: add `wallets.last_ad_reward` / `ad_rewards_date` / `ad_rewards_count` (cooldown + daily cap for "watch an ad for coins") |
 | `032_delta_wallet_rpcs.sql`            | Delta-based wallet RPCs (`settle_bet`, `apply_balance_delta`, `claim_daily_bonus`, `settle_ad_reward`) — apply balance changes relative to the live DB value instead of an absolute client snapshot, fixing the "sent coins disappear" race. Required by the updated `CasinoContext.jsx`. |
 | `033_game_history_feed.sql`            | Live bet feed: replace `game_history` self-only SELECT with select-all (`auth.role()='authenticated'`) + add the table to the `supabase_realtime` publication |
+| `052_war_server_authoritative.sql`     | CP War: server-auth economy RPCs (`war_buy_units`/`war_send_units`/`war_build`/`war_upgrade` + `war_building_cost`) — price + debit + validate ownership server-side; `war_send_units` debits the source province. Additive; apply before `053`. |
+| `053_war_write_lockdown.sql`           | CP War: revoke client `INSERT`/`UPDATE` on `war_regions`/`war_movements` (+ `DELETE` on `war_buildings`). **Breaking** — apply only after the `052` RPC client is deployed to every frontend. Closes free-army / forged-conquest / free-building. |
+| `054_war_integrity_reset.sql`          | CP War: **optional, destructive** season wipe to erase cheated state from the client-authoritative window. NOT auto-applied — a deliberate product decision. |
+| `055_war_spawn_server_random.sql`      | CP War: server-random spawn — `war_region_pool` (seeded 1027-region universe) + `war_spawn`/`war_buy_units` respawn pick a random unclaimed region server-side (client `p_region` ignored). Closes "place yourself anywhere". |

@@ -87,13 +87,15 @@ wallet" RLS). Coin transfers are the exception — they go through the `donate_c
 DEFINER RPC, which validates balance and is race-safe. Don't assume casino balances are
 tamper-proof; if you ever need them to be, move game resolution into Postgres functions.
 
-**CP War is the exception:** as of Phase 3 its combat, conquest, and income are
-**server-authoritative** via the `war_tick()` SECURITY DEFINER function (scheduled by
-`pg_cron`) — the first server-side game logic in this app. Clients can only write their **own**
-`war_regions`/`war_buildings`/`war_movements` rows; all cross-player changes flow through the
-tick. (Players can still inflate their *own* province's unit counts via direct writes — unit
-purchases remain client-side, same trust level as the casino — but they can no longer touch
-enemy territory.) See [`docs/DATABASE.md`](docs/DATABASE.md#cp-war-server-tick-phase-3--migrations-022024).
+**CP War is the exception:** its combat, conquest, and income are **server-authoritative** via
+the `war_tick()` SECURITY DEFINER function (scheduled by `pg_cron`), and as of migrations
+`052`/`053` so is its **economy**. Unit/building purchases and movements go through DEFINER RPCs
+(`war_buy_units`/`war_send_units`/`war_build`/`war_upgrade`) that price + debit + validate
+server-side; `053` revokes the client's direct `INSERT`/`UPDATE` on
+`war_regions`/`war_buildings`/`war_movements`. This closed the free-army / forged-conquest /
+free-building exploits (a player could previously set their own unit counts, forge a movement
+stack, or build for free with the cost deducted by a separate client call). Spawn location is
+server-random (`055`). See [`docs/DATABASE.md`](docs/DATABASE.md#cp-war--server-authoritative-economy-migrations-052053).
 
 ### 5. Migrations are manual and ordered
 There is no migration runner. SQL files in `supabase/migrations/` are run by hand in the

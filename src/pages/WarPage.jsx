@@ -149,11 +149,14 @@ function WarGame() {
         target = (myRegionRows.find((r) => r.is_hq) || myRegionRows[0]).region_id
       }
 
-      const { error } = await supabase.rpc('war_buy_units', { p_region: target, p_type: type, p_count: count })
+      const { data, error } = await supabase.rpc('war_buy_units', { p_region: target, p_type: type, p_count: count })
       if (error) { showFlash(`Purchase failed: ${error.message || 'unknown error'}`); return }
       loadBalance()
+      // On respawn the server picks the region (server-random spawn, migration 055), so use
+      // the region it returns rather than our requested target.
+      const landed = data?.region || target
       showFlash(respawn
-        ? `Respawned in ${graph.regions[target]?.city || target}!`
+        ? `Respawned in ${graph.regions[landed]?.city || landed}!`
         : `+${count} ${UNITS[type].label}${count > 1 ? 's' : ''}`)
     } finally { setShowBuy(false); setBusy(false) }
   }, [busy, me, balance, myRegionRows, myBuildings, regions, graph, loadBalance, myCostMult, myArmyMult])
