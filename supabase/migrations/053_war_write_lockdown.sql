@@ -22,8 +22,9 @@
 -- Free-army exploit: clients could set their own soldier/tank/jet to any value, and
 -- claim unclaimed regions, by writing this table directly. Buying/respawn now go
 -- through war_buy_units; movement debits go through war_send_units; the tick does all
--- cross-player writes.
-revoke insert, update on public.war_regions from authenticated, anon;
+-- cross-player writes. (DELETE is also revoked — the client never deletes regions, only
+-- the tick does as definer; RLS already blocked it with no DELETE policy, belt-and-braces.)
+revoke insert, update, delete on public.war_regions from authenticated, anon;
 
 -- Free-buildings / income-mint exploit: clients could insert buildings and bump levels
 -- for free. Now via war_build / war_upgrade. The tick still transfers/downgrades
@@ -31,8 +32,9 @@ revoke insert, update on public.war_regions from authenticated, anon;
 revoke insert, update, delete on public.war_buildings from authenticated, anon;
 
 -- Forged-conquest exploit: clients could insert a movement with a phantom `units` stack.
--- Now via war_send_units, which debits the source. The tick marks rows arrived (as definer).
-revoke insert, update on public.war_movements from authenticated, anon;
+-- Now via war_send_units, which debits the source. The tick marks rows arrived + prunes
+-- (as definer); the client only reads movements, so revoke DELETE too.
+revoke insert, update, delete on public.war_movements from authenticated, anon;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- VERIFICATION (run in the SQL editor / Management API after applying):
