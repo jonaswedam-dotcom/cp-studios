@@ -1,0 +1,44 @@
+-- Migration 056: lock down the two war tables that the 051/053 revokes missed. Idempotent.
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Two server-only CP War tables still carried client write grants:
+--
+--   * war_region_pool — the seeded spawn pool (1027 rows) added in 055 for
+--     server-random spawn. 051 revoked client TRUNCATE across all tables, but
+--     this table was created AFTER 051, so it kept anon+authenticated
+--     INSERT/UPDATE/DELETE/TRUNCATE. RLS (SELECT-only policy) blocks the row-level
+--     writes, BUT **TRUNCATE bypasses RLS entirely** — it is gated only by the
+--     table privilege. So any signed-in user could `truncate war_region_pool` and
+--     wipe the spawn pool, breaking spawn/respawn for everyone (a griefing/DoS).
+--     The client never references this table (war_spawn reads it as DEFINER), so
+--     revoking all client writes is safe.
+--
+--   * war_events — the per-player event feed. Both client roles held full
+--     INSERT/UPDATE/DELETE. RLS (SELECT-only policy: player_id = auth.uid()) makes
+--     the writes latent today, but the grants are an oversight: events are written
+--     only by the tick / war_* DEFINER RPCs, and the client just SELECTs + realtime-
+--     subscribes (src/war/useWarData.js). Revoke to match 053's belt-and-braces
+--     treatment of the other war tables (cover anon too even though RLS also blocks
+--     it, so a future write policy can't silently re-open it).
+--
+-- SELECT stays granted on both so the client can keep reading/syncing game state.
+-- Mirrors 045 (wallets), 051 (truncate), 053 (war_regions/buildings/movements).
+-- war_players is intentionally NOT touched: authenticated lacks INSERT/UPDATE and
+-- has no DELETE policy, anon can't satisfy auth.uid()=user_id — already locked.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+revoke insert, update, delete, truncate on public.war_region_pool from authenticated, anon;
+revoke insert, update, delete             on public.war_events      from authenticated, anon;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- VERIFICATION (rolled-back transaction simulating a signed-in client):
+--   begin;
+--     set local role authenticated;
+--     set local request.jwt.claims = '{"sub":"<any-uuid>","role":"authenticated"}';
+--     truncate public.war_region_pool;
+--     -- expected: ERROR: permission denied for table war_region_pool
+--   rollback;
+-- ─────────────────────────────────────────────────────────────────────────────
+-- ROLLBACK (re-opens the holes — emergency only):
+--   grant insert, update, delete, truncate on public.war_region_pool to authenticated;
+--   grant insert, update, delete             on public.war_events      to authenticated;
+-- ─────────────────────────────────────────────────────────────────────────────
