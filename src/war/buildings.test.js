@@ -39,6 +39,17 @@ test('global economy multipliers sum building levels', () => {
   assert.equal(strengthMultiplier([{ type: 'lab', level: 3 }]), 1.3)   // +10%/lvl
 })
 
+test('costMultiplier caps the troop discount at 50% off (floor 0.5)', () => {
+  // Stacking many factory levels would drive the raw discount past 50% (even to
+  // free), so the multiplier must clamp at 0.5 — troops are never more than 50% off.
+  const manyFactories = [
+    { type: 'factory', level: 3 },
+    { type: 'factory', level: 3 },
+    { type: 'factory', level: 3 },
+  ]
+  assert.equal(costMultiplier(manyFactories), 0.5)
+})
+
 test('incomePerTick scales with bank levels and tick length', () => {
   // 2 bank levels, 3600s tick, 125 coins/level/hour -> 250
   assert.equal(incomePerTick([{ type: 'bank', level: 2 }], 3600), 250)

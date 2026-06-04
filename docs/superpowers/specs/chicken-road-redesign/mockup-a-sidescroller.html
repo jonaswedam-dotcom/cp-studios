@@ -1,0 +1,1260 @@
+<!DOCTYPE html>
+<!--
+==================================================================================
+  CHICKEN ROAD — REDESIGN PROPOSAL  ·  MOCKUP A
+  Direction A: "Side-scroller Crosswalk"  (Spribe / Inout "Chicken Road" genre)
+  ------------------------------------------------------------------------------
+  HORIZONTAL layout. Chicken on a left sidewalk; 7 road lanes stretch right, each
+  a "stepping" slab labelled with its multiplier. Traffic flows VERTICALLY down
+  each lane (the real Crossy-Road danger model). Camera scrolls horizontally to
+  follow the chicken. Big Playfair multiplier is the emotional focal point and
+  intensifies as it climbs. Death = a car slams the chicken (squash + feather
+  burst + screen shake). Cash out = coin burst + count-up + celebration.
+
+  Self-contained: inline CSS + vanilla JS. Only external resource is the Google
+  Fonts link (DM Sans + Playfair Display). All art (chicken, cars, explosions,
+  road) is CSS/SVG. Opens via file://. Throwaway visual proposal artifact.
+
+  Shared spec (EXACT):
+    lanes        = 7
+    multipliers  = [1.3, 2.0, 3.2, 4.8, 7.2, 11.0, 18.0]
+    safeProb     = [0.72, 0.64, 0.56, 0.48, 0.40, 0.32, 0.25]
+    laneSpeedMs  = [3800, 3200, 2700, 2200, 1800, 1400, 1100]
+    carsPerLane  = [1, 2, 1, 2, 2, 3, 3]
+==================================================================================
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Chicken Road — Mockup A · Side-scroller Crosswalk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=Playfair+Display:wght@600;700;800;900&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#0c0c0c; --card:#151515; --elev:#1f1f1f;
+    --border:#252525; --soft:#383838;
+    --text:#ede8e0; --muted:#7a7570; --warm:#c4845c;
+    --amber:#fbbf24; --amber-2:#fcd34d; --amber-3:#fde68a;
+    --emer:#34d399; --emer-2:#10b981;
+    --red:#f87171; --red-2:#ef4444;
+    --road-1:#16171a; --road-2:#202225; --road-3:#101113;
+    --lane-w:114px;          /* width of one road lane slab          */
+    --sidewalk-w:96px;       /* left sidewalk where the chook starts */
+    --stage-h:420px;
+    --ease:cubic-bezier(.34,1.56,.64,1);
+  }
+
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; height:100%;}
+  body{
+    font-family:"DM Sans",-apple-system,sans-serif;
+    color:var(--text);
+    background:
+      radial-gradient(1200px 700px at 50% -10%, #1a1410 0%, transparent 60%),
+      radial-gradient(900px 600px at 50% 120%, #120f0d 0%, transparent 55%),
+      var(--bg);
+    min-height:100%;
+    display:flex; align-items:center; justify-content:center;
+    padding:22px 12px;
+    overflow-x:hidden;
+  }
+  /* faint grain over the whole page */
+  body::after{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:9999;
+    opacity:.05; mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* ============================= caption ============================= */
+  .caption{
+    position:fixed; top:14px; left:50%; transform:translateX(-50%);
+    z-index:50; text-align:center; pointer-events:none; width:min(440px,92vw);
+  }
+  .caption .tag{
+    display:inline-block; font-size:10.5px; font-weight:700; letter-spacing:.16em;
+    text-transform:uppercase; color:var(--bg);
+    background:linear-gradient(135deg,var(--amber-2),var(--warm));
+    padding:4px 11px; border-radius:999px;
+    box-shadow:0 6px 18px rgba(251,191,36,.22);
+  }
+  .caption .desc{
+    margin-top:7px; font-size:11px; color:var(--muted); letter-spacing:.02em;
+  }
+
+  /* ============================= phone =============================== */
+  .phone{
+    width:min(440px,96vw);
+    border-radius:34px;
+    background:linear-gradient(180deg,#101010,#0a0a0a);
+    border:1px solid var(--border);
+    box-shadow:
+      0 1px 0 rgba(255,255,255,.04) inset,
+      0 40px 90px -30px rgba(0,0,0,.9),
+      0 0 0 9px #0a0a0a, 0 0 0 10px #1c1c1c;
+    overflow:hidden; position:relative;
+    margin-top:54px;
+  }
+
+  /* ---- top app bar ---- */
+  .appbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:15px 16px 12px;
+    background:linear-gradient(180deg,#141414,#101010);
+    border-bottom:1px solid var(--border);
+  }
+  .brand{display:flex; align-items:center; gap:9px;}
+  .brand .logo{
+    width:32px; height:32px; border-radius:10px; position:relative;
+    background:radial-gradient(circle at 35% 30%, #2a2118, #14110d);
+    border:1px solid var(--soft);
+    display:grid; place-items:center;
+    box-shadow:0 3px 10px rgba(0,0,0,.5);
+  }
+  .brand .logo svg{width:20px; height:20px;}
+  .brand .name{font-weight:800; font-size:14.5px; letter-spacing:.01em;}
+  .brand .name b{color:var(--amber-2);}
+  .brand .sub{font-size:9.5px; color:var(--muted); letter-spacing:.13em; text-transform:uppercase; margin-top:1px;}
+
+  .balance{
+    display:flex; align-items:center; gap:7px;
+    background:linear-gradient(180deg,#1d1813,#141009);
+    border:1px solid #3a2c18; padding:7px 12px 7px 9px; border-radius:999px;
+    box-shadow:0 4px 14px rgba(0,0,0,.4), 0 0 0 1px rgba(251,191,36,.05) inset;
+  }
+  .balance .coin{width:18px; height:18px; flex:none;}
+  .balance .val{font-weight:800; font-size:14px; color:var(--amber-3); font-variant-numeric:tabular-nums; letter-spacing:.01em;}
+
+  /* ============================ STAGE =============================== */
+  .stage-wrap{ position:relative; }
+  .stage{
+    position:relative; height:var(--stage-h); overflow:hidden;
+    background:
+      linear-gradient(180deg, #1b1814 0%, #14110d 26%, #0c0b0a 100%);
+    isolation:isolate;
+  }
+  /* screen-shake host */
+  .shake{animation:none;}
+  .shaking{animation:shake .42s cubic-bezier(.36,.07,.19,.97) both;}
+  @keyframes shake{
+    10%,90%{transform:translate(-2px,1px) rotate(-.3deg);}
+    20%,80%{transform:translate(3px,-2px) rotate(.4deg);}
+    30%,50%,70%{transform:translate(-5px,2px) rotate(-.5deg);}
+    40%,60%{transform:translate(5px,-1px) rotate(.5deg);}
+  }
+
+  /* sky / distant horizon glow above the road */
+  .horizon{
+    position:absolute; inset:0 0 auto 0; height:120px; z-index:1; pointer-events:none;
+    background:
+      radial-gradient(140px 60px at 18% 30%, rgba(251,191,36,.10), transparent 70%),
+      radial-gradient(220px 80px at 80% 18%, rgba(196,132,92,.12), transparent 70%);
+  }
+  /* distant city silhouette */
+  .skyline{position:absolute; top:42px; left:0; right:0; height:64px; z-index:1; opacity:.5; pointer-events:none;}
+
+  /* The world that scrolls horizontally (camera follows chicken) */
+  .world{
+    position:absolute; top:0; left:0; bottom:0;
+    width:max-content;
+    transition:transform .52s var(--ease);
+    will-change:transform;
+    z-index:3;
+    display:flex; align-items:stretch;
+  }
+
+  /* left sidewalk start pad */
+  .sidewalk{
+    width:var(--sidewalk-w); flex:none; position:relative;
+    align-self:stretch;
+    background:
+      repeating-linear-gradient(0deg,#23211d 0 22px,#1d1b17 22px 24px),
+      linear-gradient(180deg,#2a2723,#201d19);
+    border-right:3px solid #0a0908;
+    box-shadow:inset -14px 0 24px -10px rgba(0,0,0,.7);
+  }
+  .sidewalk::before{ /* curb */
+    content:""; position:absolute; right:-3px; top:0; bottom:0; width:3px;
+    background:linear-gradient(180deg,#c9b48f,#7c6a4c);
+    opacity:.55;
+  }
+  .sidewalk .grass{
+    position:absolute; left:8px; right:10px; top:10px; height:7px; border-radius:6px;
+    background:linear-gradient(90deg,#3a5a32,#2c4827); opacity:.6;
+  }
+
+  /* a lane slab */
+  .lane{
+    width:var(--lane-w); flex:none; position:relative; overflow:hidden;
+    align-self:stretch;
+    background:
+      linear-gradient(180deg, var(--road-1) 0%, var(--road-2) 50%, var(--road-3) 100%);
+    border-right:2px dashed rgba(255,255,255,.05);
+  }
+  /* lane edge paint lines (the dashed center) */
+  .lane::before{
+    content:""; position:absolute; left:50%; top:-20px; bottom:-20px; width:6px;
+    transform:translateX(-50%);
+    background:repeating-linear-gradient(180deg, rgba(251,191,36,.0) 0 16px, rgba(253,224,71,.16) 16px 40px);
+    opacity:.0; transition:opacity .4s;
+  }
+  /* danger heat-haze grows deeper to the right (set per-lane via --heat) */
+  .lane .heat{
+    position:absolute; inset:0; pointer-events:none;
+    background:linear-gradient(180deg, rgba(239,68,68,.0), rgba(239,68,68,calc(.16*var(--heat))) 55%, rgba(239,68,68,.0));
+    opacity:.0; transition:opacity .5s;
+  }
+  .lane.armed .heat{opacity:1;}
+  .lane.armed::before{opacity:1;}
+
+  /* multiplier tab painted on the road */
+  .lane .mult-tab{
+    position:absolute; left:50%; bottom:14px; transform:translateX(-50%);
+    z-index:6; text-align:center; min-width:74px;
+    pointer-events:none; transition:transform .35s var(--ease), opacity .3s;
+  }
+  .lane .mult-tab .pill{
+    font-family:"Playfair Display",serif; font-weight:800; font-size:18px;
+    line-height:1; color:var(--text);
+    background:linear-gradient(180deg,#222,#161616);
+    border:1px solid var(--soft);
+    padding:7px 9px 6px; border-radius:11px;
+    box-shadow:0 6px 14px rgba(0,0,0,.5), 0 1px 0 rgba(255,255,255,.05) inset;
+    position:relative;
+  }
+  .lane .mult-tab .pct{
+    margin-top:5px; font-size:9px; font-weight:700; letter-spacing:.04em;
+    color:var(--muted); font-family:"DM Sans",sans-serif;
+  }
+  .lane.next .mult-tab{transform:translateX(-50%) translateY(-3px) scale(1.06);}
+  .lane.next .mult-tab .pill{
+    color:var(--amber-3);
+    border-color:#5a4416;
+    background:linear-gradient(180deg,#2a2113,#19130a);
+    box-shadow:0 0 0 1px rgba(251,191,36,.25) inset, 0 8px 22px rgba(251,191,36,.18);
+    animation:tabPulse 1.4s ease-in-out infinite;
+  }
+  @keyframes tabPulse{50%{box-shadow:0 0 0 1px rgba(251,191,36,.45) inset, 0 8px 30px rgba(251,191,36,.32);}}
+  .lane.cleared .mult-tab .pill{
+    color:var(--emer); border-color:#1d4d3c;
+    background:linear-gradient(180deg,#102a22,#0b1c17);
+  }
+  .lane.cleared::after{ /* cleared overlay sheen */
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background:linear-gradient(180deg, rgba(52,211,153,.08), transparent 60%);
+  }
+
+  /* a manhole/stepping detail in the lane center to anchor the chicken */
+  .lane .stepmark{
+    position:absolute; left:50%; top:50%; width:62px; height:62px;
+    transform:translate(-50%,-50%);
+    border-radius:50%;
+    background:
+      radial-gradient(circle at 50% 40%, rgba(255,255,255,.04), transparent 60%);
+    box-shadow:0 0 0 2px rgba(255,255,255,.03) inset;
+    opacity:.5;
+  }
+
+  /* ---- cars track (vertical lane the cars drive down) ---- */
+  .carlane{position:absolute; inset:0; z-index:5; pointer-events:none;}
+
+  /* ============================ CAR ART ============================ */
+  .car{
+    position:absolute; left:50%; transform:translateX(-50%) translateY(-120px);
+    width:62px; height:96px; z-index:5;
+    will-change:transform;
+  }
+  .car .body{
+    position:absolute; inset:0;
+    border-radius:18px 18px 16px 16px;
+    background:linear-gradient(180deg, var(--c1,#e2554f) 0%, var(--c2,#b8332e) 100%);
+    box-shadow:
+      0 0 0 1px rgba(0,0,0,.45),
+      0 2px 0 rgba(255,255,255,.18) inset,
+      0 -8px 14px rgba(0,0,0,.25) inset;
+  }
+  .car .roof{
+    position:absolute; left:9px; right:9px; top:24px; height:40px;
+    border-radius:12px;
+    background:linear-gradient(180deg, rgba(255,255,255,.10), rgba(0,0,0,.30));
+  }
+  .car .glass{
+    position:absolute; left:13px; right:13px; top:28px; height:14px; border-radius:7px 7px 4px 4px;
+    background:linear-gradient(180deg,#bfe7ff,#5b86a3); opacity:.9;
+    box-shadow:0 1px 0 rgba(255,255,255,.4) inset;
+  }
+  .car .glass.rear{top:auto; bottom:20px; height:13px; border-radius:4px 4px 7px 7px;}
+  .car .head{ /* headlights (front = bottom, since driving down) */
+    position:absolute; bottom:5px; width:11px; height:7px; border-radius:4px;
+    background:radial-gradient(circle,#fff7d6,#ffd34d);
+    box-shadow:0 3px 16px 4px rgba(255,224,130,.55);
+  }
+  .car .head.l{left:8px;} .car .head.r{right:8px;}
+  .car .beam{
+    position:absolute; bottom:-2px; left:50%; transform:translateX(-50%);
+    width:46px; height:60px;
+    background:radial-gradient(ellipse 60% 100% at 50% 0%, rgba(255,231,150,.22), transparent 70%);
+    opacity:.7;
+  }
+  .car .tail{
+    position:absolute; top:4px; width:10px; height:5px; border-radius:3px;
+    background:radial-gradient(circle,#ff8a8a,#c01515);
+    box-shadow:0 0 10px 2px rgba(248,113,113,.5);
+  }
+  .car .tail.l{left:9px;} .car .tail.r{right:9px;}
+  .car .shadow{
+    position:absolute; left:50%; bottom:-10px; transform:translateX(-50%);
+    width:64px; height:18px; border-radius:50%;
+    background:radial-gradient(ellipse,rgba(0,0,0,.5),transparent 70%);
+    z-index:-1;
+  }
+
+  /* ============================ CHICKEN =========================== */
+  .chook-host{
+    position:absolute; z-index:8; pointer-events:none;
+    left:0; top:0;
+    transition:transform .5s var(--ease);
+    will-change:transform;
+  }
+  .chook{
+    position:relative; width:54px; height:64px;
+    transform-origin:50% 92%;
+    animation:idleBob 1.6s ease-in-out infinite;
+  }
+  @keyframes idleBob{50%{transform:translateY(-3px);}}
+  .chook.hopping{animation:hop .5s var(--ease);}
+  @keyframes hop{
+    0%{transform:translateY(0) scaleX(1) scaleY(1);}
+    35%{transform:translateY(-30px) scaleX(.92) scaleY(1.1);}
+    70%{transform:translateY(-6px) scaleX(1.08) scaleY(.92);}
+    100%{transform:translateY(0) scaleX(1) scaleY(1);}
+  }
+  .chook.squashed{animation:squash .3s forwards;}
+  @keyframes squash{to{transform:translateY(14px) scaleX(1.5) scaleY(.32); filter:brightness(.6);}}
+  .chook.cheer{animation:cheer .5s ease-in-out infinite;}
+  @keyframes cheer{0%,100%{transform:translateY(0) rotate(-3deg);}50%{transform:translateY(-10px) rotate(3deg);}}
+
+  /* body */
+  .chook .legs{position:absolute; left:50%; bottom:0; transform:translateX(-50%); width:24px; height:14px;}
+  .chook .leg{position:absolute; bottom:0; width:3px; height:13px; background:linear-gradient(180deg,#f0a23a,#c87715); border-radius:2px;}
+  .chook .leg.l{left:5px; transform:rotate(-6deg);}
+  .chook .leg.r{right:5px; transform:rotate(6deg);}
+  .chook .leg::after{content:""; position:absolute; bottom:-1px; left:-3px; width:9px; height:3px; background:#c87715; border-radius:2px;}
+
+  .chook .tail-f{
+    position:absolute; left:-6px; bottom:18px; width:20px; height:22px; border-radius:60% 40% 50% 50%;
+    background:linear-gradient(135deg,#fff,#e9e3d6);
+    transform:rotate(-22deg);
+    box-shadow:0 0 0 1px rgba(0,0,0,.06) inset;
+  }
+  .chook .body{
+    position:absolute; left:50%; bottom:9px; transform:translateX(-50%);
+    width:40px; height:42px; border-radius:50% 50% 48% 48%;
+    background:
+      radial-gradient(circle at 38% 30%, #ffffff, #f3eee2 60%, #e2d8c4 100%);
+    box-shadow:0 4px 10px rgba(0,0,0,.4), 0 -3px 6px rgba(255,255,255,.5) inset;
+  }
+  .chook .wing{
+    position:absolute; right:7px; bottom:20px; width:18px; height:22px;
+    border-radius:60% 40% 60% 50%;
+    background:linear-gradient(180deg,#f6f1e6,#dccfb8);
+    box-shadow:0 1px 2px rgba(0,0,0,.15) inset;
+    transform:rotate(8deg);
+  }
+  .chook .head{
+    position:absolute; left:50%; top:0; transform:translateX(-46%);
+    width:30px; height:30px; border-radius:50%;
+    background:radial-gradient(circle at 40% 32%, #ffffff, #efe9dc);
+    box-shadow:0 3px 6px rgba(0,0,0,.3);
+    z-index:2;
+  }
+  .chook .comb{
+    position:absolute; left:50%; top:-9px; transform:translateX(-60%);
+    width:20px; height:13px; z-index:1;
+  }
+  .chook .comb i{position:absolute; bottom:0; width:8px; height:11px; border-radius:50% 50% 0 0; background:linear-gradient(180deg,#ff6b6b,#e23b3b);}
+  .chook .comb i:nth-child(1){left:0; height:8px;}
+  .chook .comb i:nth-child(2){left:6px; height:12px;}
+  .chook .comb i:nth-child(3){left:12px; height:9px;}
+  .chook .eye{
+    position:absolute; left:50%; top:9px; transform:translateX(2px);
+    width:6px; height:6px; border-radius:50%; background:#181818; z-index:3;
+    box-shadow:0 0 0 2px #fff;
+  }
+  .chook .eye::after{content:""; position:absolute; top:0; right:0; width:2px; height:2px; border-radius:50%; background:#fff;}
+  .chook .beak{
+    position:absolute; left:50%; top:15px; transform:translateX(9px);
+    width:0; height:0; z-index:3;
+    border-top:5px solid transparent; border-bottom:5px solid transparent;
+    border-left:9px solid #f5a623;
+    filter:drop-shadow(0 1px 0 rgba(0,0,0,.2));
+  }
+  .chook .wattle{
+    position:absolute; left:50%; top:21px; transform:translateX(7px);
+    width:6px; height:9px; border-radius:0 0 50% 50%; background:linear-gradient(180deg,#e23b3b,#b71f1f); z-index:2;
+  }
+  /* chicken contact shadow */
+  .chook-shadow{
+    position:absolute; left:50%; bottom:-2px; transform:translateX(-50%);
+    width:42px; height:13px; border-radius:50%;
+    background:radial-gradient(ellipse,rgba(0,0,0,.55),transparent 70%);
+    z-index:7;
+    transition:transform .5s var(--ease);
+  }
+
+  /* ===================== BIG MULTIPLIER READOUT =================== */
+  .hud-top{
+    position:absolute; top:0; left:0; right:0; z-index:20; pointer-events:none;
+    padding:14px 16px 22px;
+    background:linear-gradient(180deg, rgba(8,8,8,.86) 0%, rgba(8,8,8,.5) 55%, transparent 100%);
+  }
+  .multi-readout{ text-align:center; position:relative; }
+  .multi-readout .lbl{
+    font-size:10px; font-weight:700; letter-spacing:.28em; text-transform:uppercase;
+    color:var(--muted);
+  }
+  .multi-readout .big{
+    font-family:"Playfair Display",serif; font-weight:900;
+    font-size:62px; line-height:.92; letter-spacing:-.01em;
+    margin-top:2px;
+    color:var(--amber-3);
+    text-shadow:0 0 30px rgba(251,191,36,.45), 0 0 6px rgba(253,224,71,.6);
+    transition:font-size .4s var(--ease), color .3s, text-shadow .3s;
+    display:inline-block;
+  }
+  .multi-readout .big .x{font-size:.5em; font-weight:700; opacity:.7; margin-left:2px; vertical-align:.18em;}
+  .multi-readout.crossing .big{animation:multiPop .45s var(--ease);}
+  @keyframes multiPop{0%{transform:scale(.7); filter:brightness(1.7);}60%{transform:scale(1.14);}100%{transform:scale(1);}}
+  .multi-readout.hot .big{
+    color:#ffe9a8;
+    text-shadow:0 0 50px rgba(251,191,36,.8), 0 0 14px rgba(255,255,255,.5);
+  }
+  .multi-readout.win .big{color:var(--emer); text-shadow:0 0 44px rgba(52,211,153,.6);}
+  .multi-readout.dead .big{color:var(--red); text-shadow:0 0 40px rgba(248,113,113,.55);}
+
+  .substat{
+    margin-top:9px; display:flex; gap:8px; justify-content:center; align-items:stretch;
+    font-size:11px;
+  }
+  .substat .chip{
+    background:rgba(20,20,20,.7); border:1px solid var(--border);
+    border-radius:10px; padding:5px 10px; line-height:1.25; backdrop-filter:blur(4px);
+  }
+  .substat .chip .k{display:block; font-size:8.5px; letter-spacing:.13em; text-transform:uppercase; color:var(--muted);}
+  .substat .chip .v{font-weight:800; font-variant-numeric:tabular-nums;}
+  .substat .chip.next .v{color:var(--amber-3);}
+  .substat .chip.cash .v{color:var(--emer);}
+  .substat .chip.safe .v{color:var(--text);}
+
+  /* vignette over stage */
+  .stage .vignette{position:absolute; inset:0; z-index:18; pointer-events:none;
+    box-shadow:inset 0 0 90px 24px rgba(0,0,0,.7);}
+
+  /* ===================== FX: feathers / coins / text ============= */
+  .fx-layer{position:absolute; inset:0; z-index:30; pointer-events:none; overflow:hidden;}
+  .feather{
+    position:absolute; width:11px; height:7px; border-radius:60% 60% 40% 40%;
+    background:linear-gradient(180deg,#fff,#e7ded0);
+    will-change:transform,opacity;
+  }
+  .dust{
+    position:absolute; width:14px; height:14px; border-radius:50%;
+    background:radial-gradient(circle,rgba(120,110,100,.7),transparent 70%);
+  }
+  .coin-fx{
+    position:absolute; width:20px; height:20px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%,#fde68a,#f59e0b 65%,#b45309);
+    box-shadow:0 0 12px rgba(251,191,36,.6), 0 0 0 1px rgba(180,83,9,.7) inset;
+    will-change:transform,opacity;
+  }
+  .coin-fx::after{content:"$"; position:absolute; inset:0; display:grid; place-items:center; font-weight:900; font-size:11px; color:#92560c;}
+  .floattext{
+    position:absolute; left:50%; top:46%; transform:translateX(-50%);
+    font-family:"Playfair Display",serif; font-weight:900; font-size:30px;
+    z-index:34; pointer-events:none; white-space:nowrap;
+  }
+  .floattext.win{color:var(--emer); text-shadow:0 0 24px rgba(52,211,153,.6);}
+  .floattext.dead{color:var(--red); text-shadow:0 0 24px rgba(248,113,113,.6);}
+  .impact-flash{
+    position:absolute; inset:0; z-index:33; pointer-events:none; opacity:0;
+    background:radial-gradient(circle at var(--fx,50%) 50%, rgba(255,90,90,.5), transparent 55%);
+  }
+  .impact-flash.go{animation:flash .4s ease-out;}
+  @keyframes flash{0%{opacity:.9;}100%{opacity:0;}}
+
+  /* ============================ PANEL ============================== */
+  .panel{
+    background:linear-gradient(180deg,#161616,#111);
+    border-top:1px solid var(--border);
+    padding:14px 16px 18px;
+  }
+
+  /* bet row */
+  .betbox{
+    background:var(--card); border:1px solid var(--border); border-radius:18px;
+    padding:13px 14px; margin-bottom:12px;
+    box-shadow:0 1px 0 rgba(255,255,255,.03) inset;
+  }
+  .betbox .row1{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:11px;}
+  .betbox .lbl{font-size:10px; font-weight:700; letter-spacing:.16em; text-transform:uppercase; color:var(--muted);}
+  .betval{
+    display:flex; align-items:center; gap:8px;
+    background:#101010; border:1px solid var(--soft); border-radius:12px;
+    padding:8px 12px; min-width:138px; justify-content:flex-end;
+  }
+  .betval .coin{width:17px; height:17px;}
+  .betval input{
+    width:88px; background:none; border:none; outline:none; text-align:right;
+    color:var(--amber-3); font-family:"DM Sans"; font-weight:800; font-size:18px;
+    font-variant-numeric:tabular-nums;
+  }
+  .chips{display:flex; gap:7px; flex-wrap:wrap;}
+  .chip-btn{
+    flex:1 1 0; min-width:46px;
+    background:var(--elev); border:1px solid var(--soft); color:var(--text);
+    border-radius:11px; padding:9px 4px; font-weight:700; font-size:13px; cursor:pointer;
+    font-family:"DM Sans"; transition:transform .12s, border-color .15s, background .15s;
+  }
+  .chip-btn:hover{border-color:#4d4d4d;}
+  .chip-btn:active{transform:scale(.93);}
+  .chip-btn.alt{color:var(--amber-2); border-color:#3a2c18;}
+
+  /* primary action */
+  .action{display:flex; gap:10px; align-items:stretch;}
+  .btn{
+    flex:1; border:none; cursor:pointer; border-radius:16px; padding:16px 14px;
+    font-family:"DM Sans"; font-weight:800; font-size:16px; letter-spacing:.01em;
+    color:#1a1206; position:relative; overflow:hidden;
+    transition:transform .12s var(--ease), box-shadow .2s, filter .2s;
+  }
+  .btn:active{transform:scale(.97);}
+  .btn[disabled]{opacity:.4; cursor:not-allowed; filter:saturate(.4);}
+  .btn .glow{position:absolute; inset:0; border-radius:inherit; pointer-events:none;}
+  .btn-start{
+    background:linear-gradient(180deg,var(--amber-2),var(--amber));
+    box-shadow:0 10px 26px -6px rgba(251,191,36,.55), 0 1px 0 rgba(255,255,255,.5) inset;
+  }
+  .btn-start::after{content:""; position:absolute; top:0; left:-40%; width:30%; height:100%;
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,.6),transparent); transform:skewX(-20deg);
+    animation:sheen 3.4s ease-in-out infinite;}
+  @keyframes sheen{0%,60%{left:-40%;}100%{left:140%;}}
+  .btn-step{
+    background:linear-gradient(180deg,var(--amber-3),var(--amber-2));
+    box-shadow:0 10px 26px -6px rgba(251,191,36,.6), 0 1px 0 rgba(255,255,255,.5) inset;
+  }
+  .btn-cash{
+    color:#04140e;
+    background:linear-gradient(180deg,var(--emer),var(--emer-2));
+    box-shadow:0 10px 26px -6px rgba(52,211,153,.55), 0 1px 0 rgba(255,255,255,.4) inset;
+    flex:1.15;
+  }
+  .btn-again{
+    background:linear-gradient(180deg,#2a2a2a,#1d1d1d); color:var(--text);
+    box-shadow:0 8px 20px -6px rgba(0,0,0,.6), 0 1px 0 rgba(255,255,255,.05) inset;
+  }
+  .btn .sub{display:block; font-size:9.5px; font-weight:700; letter-spacing:.08em; opacity:.7; margin-top:2px;}
+  .btn-cash .sub{color:#04261b;}
+
+  /* history row */
+  .history{
+    margin-top:13px; display:flex; align-items:center; gap:7px;
+    padding-top:12px; border-top:1px solid var(--border);
+  }
+  .history .h-lbl{font-size:9px; font-weight:700; letter-spacing:.13em; text-transform:uppercase; color:var(--muted); flex:none; margin-right:2px;}
+  .history .h-list{display:flex; gap:6px; overflow:hidden; flex:1;}
+  .hpill{
+    font-size:11px; font-weight:800; padding:5px 8px; border-radius:8px; flex:none;
+    font-variant-numeric:tabular-nums; border:1px solid var(--border);
+    animation:hpop .35s var(--ease);
+  }
+  @keyframes hpop{from{transform:scale(.6); opacity:0;}}
+  .hpill.win{color:var(--emer); background:rgba(16,185,129,.1); border-color:#1d4d3c;}
+  .hpill.loss{color:var(--red); background:rgba(239,68,68,.08); border-color:#4d2222;}
+
+  /* toast */
+  .toast{
+    position:absolute; left:50%; bottom:14px; transform:translateX(-50%) translateY(20px);
+    background:#1c1c1c; border:1px solid var(--soft); color:var(--text);
+    padding:9px 15px; border-radius:12px; font-size:12.5px; font-weight:600;
+    box-shadow:0 12px 30px rgba(0,0,0,.6); opacity:0; pointer-events:none; z-index:60;
+    transition:opacity .3s, transform .3s var(--ease);
+  }
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+  .toast.danger{border-color:#5a2222; color:var(--red);}
+  .toast.good{border-color:#1d4d3c; color:var(--emer);}
+
+  .hide{display:none !important;}
+</style>
+</head>
+<body>
+
+  <!-- which mockup is this -->
+  <div class="caption">
+    <span class="tag">Direction A — Side-scroller Crosswalk</span>
+    <div class="desc">Horizontal hop across live traffic · camera-follow road · big glowing multiplier</div>
+  </div>
+
+  <div class="phone">
+
+    <!-- ===================== APP BAR ===================== -->
+    <div class="appbar">
+      <div class="brand">
+        <span class="logo">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M9 4.5c1.6 0 2.6 1 2.6 2.5 0 .5-.1.9-.3 1.3 1.6.5 2.9 1.9 3.1 4l.4 3.2c.2 1.7-1 3.2-2.7 3.4l-4.4.5c-2 .2-3.7-1.4-3.5-3.4l.5-4.6C5.5 8.7 7 7 9 6.6c-.2-.4-.3-.8-.3-1.2 0-.5.2-.9.6-.9Z" fill="#fde68a"/>
+            <path d="M9.2 3.6 8 5.6l2.2-.3-1-1.7Z" fill="#ef4444"/>
+            <circle cx="12.6" cy="10.4" r="1" fill="#181818"/>
+            <path d="M14.4 10.8 16.4 11l-1.9 1.1-.1-1.3Z" fill="#f59e0b"/>
+          </svg>
+        </span>
+        <div>
+          <div class="name">Chicken<b>Road</b></div>
+          <div class="sub">Cross · Climb · Cash out</div>
+        </div>
+      </div>
+      <div class="balance">
+        <svg class="coin" viewBox="0 0 24 24"><defs><radialGradient id="cg" cx="35%" cy="30%"><stop offset="0" stop-color="#fde68a"/><stop offset="65%" stop-color="#f59e0b"/><stop offset="1" stop-color="#b45309"/></radialGradient></defs><circle cx="12" cy="12" r="10" fill="url(#cg)" stroke="#7c4708" stroke-width="1"/><circle cx="12" cy="12" r="7" fill="none" stroke="#fff4cf" stroke-opacity=".5"/><text x="12" y="16.5" text-anchor="middle" font-size="11" font-weight="900" fill="#7c4708" font-family="DM Sans">$</text></svg>
+        <span class="val" id="balance">5,000</span>
+      </div>
+    </div>
+
+    <!-- ===================== STAGE ===================== -->
+    <div class="stage-wrap">
+      <div class="stage shake" id="stage">
+
+        <div class="horizon"></div>
+        <svg class="skyline" viewBox="0 0 440 64" preserveAspectRatio="none">
+          <g fill="#0c0d10">
+            <rect x="0"  y="26" width="34" height="38"/><rect x="40" y="12" width="26" height="52"/>
+            <rect x="72" y="32" width="40" height="32"/><rect x="118" y="18" width="22" height="46"/>
+            <rect x="146" y="36" width="48" height="28"/><rect x="200" y="8" width="24" height="56"/>
+            <rect x="230" y="28" width="38" height="36"/><rect x="274" y="20" width="20" height="44"/>
+            <rect x="300" y="34" width="46" height="30"/><rect x="352" y="14" width="26" height="50"/>
+            <rect x="384" y="30" width="40" height="34"/>
+          </g>
+          <g fill="#1a1510" opacity=".9">
+            <rect x="46" y="20" width="4" height="5"/><rect x="54" y="20" width="4" height="5"/>
+            <rect x="206" y="16" width="4" height="5"/><rect x="214" y="16" width="4" height="5"/>
+            <rect x="358" y="22" width="4" height="5"/><rect x="366" y="22" width="4" height="5"/>
+          </g>
+        </svg>
+
+        <!-- the scrolling world (built by JS): sidewalk + 7 lanes -->
+        <div class="world" id="world"></div>
+
+        <!-- chicken + its shadow live in stage coords, JS positions them -->
+        <div class="chook-shadow" id="chookShadow"></div>
+        <div class="chook-host" id="chookHost">
+          <div class="chook" id="chook">
+            <div class="tail-f"></div>
+            <div class="body"></div>
+            <div class="wing"></div>
+            <div class="legs"><span class="leg l"></span><span class="leg r"></span></div>
+            <div class="head">
+              <div class="comb"><i></i><i></i><i></i></div>
+              <div class="eye"></div>
+              <div class="beak"></div>
+              <div class="wattle"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- effect layers -->
+        <div class="fx-layer" id="fxLayer"></div>
+        <div class="impact-flash" id="impactFlash"></div>
+        <div class="vignette"></div>
+
+        <!-- big multiplier HUD -->
+        <div class="hud-top">
+          <div class="multi-readout" id="readout">
+            <div class="lbl" id="roLbl">Current multiplier</div>
+            <div class="big" id="multBig">1.00<span class="x">×</span></div>
+            <div class="substat" id="substat">
+              <div class="chip next"><span class="k">Next lane</span><span class="v" id="nextMult">1.30×</span></div>
+              <div class="chip safe"><span class="k">Safe odds</span><span class="v" id="nextSafe">72%</span></div>
+              <div class="chip cash"><span class="k">Cash out</span><span class="v" id="cashVal">—</span></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="toast" id="toast"></div>
+    </div>
+
+    <!-- ===================== PANEL ===================== -->
+    <div class="panel">
+
+      <!-- BETTING controls -->
+      <div id="betUI">
+        <div class="betbox">
+          <div class="row1">
+            <span class="lbl">Bet amount</span>
+            <div class="betval">
+              <svg class="coin" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="url(#cg)" stroke="#7c4708" stroke-width="1"/></svg>
+              <input id="betInput" type="text" inputmode="numeric" value="100" />
+            </div>
+          </div>
+          <div class="chips">
+            <button class="chip-btn" data-bet="10">10</button>
+            <button class="chip-btn" data-bet="50">50</button>
+            <button class="chip-btn" data-bet="100">100</button>
+            <button class="chip-btn" data-bet="500">500</button>
+            <button class="chip-btn alt" data-op="half">½</button>
+            <button class="chip-btn alt" data-op="max">MAX</button>
+          </div>
+        </div>
+        <div class="action">
+          <button class="btn btn-start" id="startBtn">
+            Start crossing
+            <span class="sub">Hop into lane 1 · 1.30×</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- CROSSING controls -->
+      <div id="crossUI" class="hide">
+        <div class="action">
+          <button class="btn btn-step" id="stepBtn">
+            Step →
+            <span class="sub" id="stepSub">to 1.30× · 72% safe</span>
+          </button>
+          <button class="btn btn-cash" id="cashBtn" disabled>
+            Cash out
+            <span class="sub" id="cashSub">cross a lane first</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- END controls -->
+      <div id="endUI" class="hide">
+        <div class="action">
+          <button class="btn btn-again" id="againBtn">Play again</button>
+        </div>
+      </div>
+
+      <!-- history -->
+      <div class="history">
+        <span class="h-lbl">Recent</span>
+        <div class="h-list" id="history"></div>
+      </div>
+
+    </div>
+  </div>
+
+<script>
+"use strict";
+/* ============================ SPEC ============================ */
+const MULT   = [1.3, 2.0, 3.2, 4.8, 7.2, 11.0, 18.0];
+const SAFE   = [0.72, 0.64, 0.56, 0.48, 0.40, 0.32, 0.25];
+const SPEED  = [3800, 3200, 2700, 2200, 1800, 1400, 1100];
+const CARS   = [1, 2, 1, 2, 2, 3, 3];
+const N       = 7;
+const LANE_W  = 114;   // keep in sync with --lane-w
+const WALK_W  = 96;    // keep in sync with --sidewalk-w
+const STAGE_H = 420;
+
+/* car colour sets */
+const CAR_PAINT = [
+  ['#e2554f','#b8332e'], ['#f0b54a','#c98a1a'], ['#5f9bdc','#2f6aa6'],
+  ['#7bd389','#3f9a55'], ['#c98ae0','#8a4eb0'], ['#e8e2d4','#b4ac98'],
+  ['#ef8b5b','#c2592c'], ['#6fd0c4','#2f9588']
+];
+
+/* ============================ STATE ========================== */
+let balance = 5000;
+let bet = 100;
+let pos = -1;          // lane index the chicken is on; -1 = on sidewalk
+let curMult = 1.0;
+let phase = 'betting'; // betting | crossing | ended
+let busy = false;      // mid-animation lock
+const carTimers = [];
+const history = [];
+
+/* ============================ DOM ============================ */
+const $ = s => document.querySelector(s);
+const world      = $('#world');
+const stage      = $('#stage');
+const chookHost  = $('#chookHost');
+const chook      = $('#chook');
+const chookShadow= $('#chookShadow');
+const fxLayer    = $('#fxLayer');
+const impactFlash= $('#impactFlash');
+const readout    = $('#readout');
+const multBig    = $('#multBig');
+const nextMultEl = $('#nextMult');
+const nextSafeEl = $('#nextSafe');
+const cashValEl  = $('#cashVal');
+const roLbl      = $('#roLbl');
+const balanceEl  = $('#balance');
+const betInput   = $('#betInput');
+const toastEl    = $('#toast');
+const historyEl  = $('#history');
+
+const betUI   = $('#betUI');
+const crossUI = $('#crossUI');
+const endUI   = $('#endUI');
+const startBtn= $('#startBtn');
+const stepBtn = $('#stepBtn');
+const cashBtn = $('#cashBtn');
+const againBtn= $('#againBtn');
+
+const fmt = n => Math.round(n).toLocaleString('en-US');
+
+/* ===================== BUILD THE ROAD ======================== */
+function buildWorld(){
+  world.innerHTML = '';
+  // sidewalk
+  const sw = document.createElement('div');
+  sw.className = 'sidewalk';
+  sw.innerHTML = '<span class="grass"></span><span class="grass" style="top:auto;bottom:12px;"></span>';
+  world.appendChild(sw);
+
+  for(let i=0;i<N;i++){
+    const lane = document.createElement('div');
+    lane.className = 'lane';
+    lane.dataset.idx = i;
+    lane.style.setProperty('--heat', (i/(N-1)).toFixed(2));
+    lane.innerHTML = `
+      <div class="heat"></div>
+      <div class="stepmark"></div>
+      <div class="carlane" id="carlane-${i}"></div>
+      <div class="mult-tab">
+        <div class="pill">${MULT[i].toFixed(2).replace(/0$/,'')}×</div>
+        <div class="pct">${Math.round(SAFE[i]*100)}% safe</div>
+      </div>`;
+    world.appendChild(lane);
+  }
+}
+
+/* lane center X within the world (px) */
+const laneCenterX = i => WALK_W + i*LANE_W + LANE_W/2;
+const sidewalkX   = () => WALK_W/2;
+
+/* camera: keep active+next lane comfortably in view */
+function updateCamera(){
+  const viewW = stage.clientWidth;
+  // focus point = where the chicken stands (or just ahead so next lane shows)
+  const focusX = (pos < 0 ? sidewalkX() : laneCenterX(pos)) + LANE_W*0.55;
+  let tx = viewW*0.42 - focusX;        // bias chicken toward left-of-center
+  const worldW = WALK_W + N*LANE_W;
+  const minTx = Math.min(0, viewW - worldW); // don't scroll past the end
+  tx = Math.max(minTx, Math.min(0, tx));
+  world.style.transform = `translateX(${tx}px)`;
+  return tx;
+}
+
+/* place chicken at its lane (uses same camera transform) */
+function placeChicken(animated=true){
+  const tx = updateCamera();
+  const worldX = (pos < 0 ? sidewalkX() : laneCenterX(pos));
+  const screenX = worldX + tx;
+  const y = STAGE_H*0.5;               // vertical middle of the road
+  if(!animated){ chookHost.style.transition='none'; chookShadow.style.transition='none'; }
+  chookHost.style.transform   = `translate(${screenX-27}px, ${y-32}px)`;
+  chookShadow.style.transform = `translate(${screenX}px, ${y+30}px) translateX(-50%)`;
+  if(!animated){
+    void chookHost.offsetWidth;
+    chookHost.style.transition=''; chookShadow.style.transition='';
+  }
+}
+
+/* ===================== TRAFFIC ENGINE ======================== */
+function spawnCar(laneIdx){
+  const host = document.getElementById('carlane-'+laneIdx);
+  if(!host) return;
+  const car = document.createElement('div');
+  car.className = 'car';
+  const paint = CAR_PAINT[(laneIdx + Math.floor(Math.random()*3)) % CAR_PAINT.length];
+  car.style.setProperty('--c1', paint[0]);
+  car.style.setProperty('--c2', paint[1]);
+  car.innerHTML = `
+    <div class="shadow"></div>
+    <div class="body"></div>
+    <div class="roof"></div>
+    <div class="glass"></div><div class="glass rear"></div>
+    <span class="tail l"></span><span class="tail r"></span>
+    <span class="head l"></span><span class="head r"></span>
+    <span class="beam"></span>`;
+  host.appendChild(car);
+
+  const dur = SPEED[laneIdx];
+  const startY = -120, endY = STAGE_H + 130;
+  const t0 = performance.now();
+  car._anim = requestAnimationFrame(function step(now){
+    const t = (now - t0) / dur;
+    if(t >= 1){ car.remove(); return; }
+    const y = startY + (endY - startY)*t;
+    car.style.transform = `translateX(-50%) translateY(${y}px)`;
+    car._y = y;
+    car._anim = requestAnimationFrame(step);
+  });
+}
+
+function startTraffic(){
+  stopTraffic();
+  for(let i=0;i<N;i++){
+    const gap = SPEED[i] / (CARS[i] + 0.4);
+    // stagger initial spawns so lanes don't pulse in unison
+    for(let c=0;c<CARS[i];c++){
+      setTimeout(()=>spawnCar(i), (gap*c) + Math.random()*400);
+    }
+    const id = setInterval(()=>spawnCar(i), gap);
+    carTimers.push(id);
+  }
+}
+function stopTraffic(){
+  while(carTimers.length) clearInterval(carTimers.pop());
+}
+
+/* ===================== HUD / READOUT ========================= */
+function setMult(v, opts={}){
+  curMult = v;
+  multBig.innerHTML = `${v.toFixed(2)}<span class="x">×</span>`;
+  // intensify size + heat as it climbs
+  const grow = Math.min(1, (v-1)/17);
+  multBig.style.fontSize = (58 + grow*26) + 'px';
+  readout.classList.toggle('hot', v >= 4.8);
+  if(opts.pop){
+    readout.classList.add('crossing');
+    setTimeout(()=>readout.classList.remove('crossing'), 460);
+  }
+}
+
+function refreshHUD(){
+  const next = pos + 1;
+  if(next < N){
+    nextMultEl.textContent = MULT[next].toFixed(2).replace(/0$/,'') + '×';
+    nextSafeEl.textContent = Math.round(SAFE[next]*100) + '%';
+    $('#stepSub').textContent = `to ${MULT[next].toFixed(2).replace(/0$/,'')}× · ${Math.round(SAFE[next]*100)}% safe`;
+  } else {
+    nextMultEl.textContent = '—';
+    nextSafeEl.textContent = '—';
+    $('#stepSub').textContent = 'final lane reached';
+  }
+  if(pos >= 0){
+    const payout = bet * curMult;
+    cashValEl.textContent = fmt(payout);
+    cashBtn.disabled = false;
+    $('#cashSub').textContent = `+${fmt(payout - bet)} net`;
+  } else {
+    cashValEl.textContent = '—';
+    cashBtn.disabled = true;
+    $('#cashSub').textContent = 'cross a lane first';
+  }
+}
+
+/* highlight active / next / cleared lanes */
+function paintLanes(){
+  document.querySelectorAll('.lane').forEach((l,i)=>{
+    l.classList.toggle('cleared', i <= pos);
+    l.classList.toggle('next', i === pos+1 && phase==='crossing');
+    l.classList.toggle('armed', i === pos+1 && phase==='crossing');
+  });
+}
+
+/* ===================== FLOW: START =========================== */
+function clampBet(){
+  let v = parseInt(String(betInput.value).replace(/[^\d]/g,''),10);
+  if(isNaN(v)||v<1) v=1;
+  if(v>balance) v=balance;
+  bet = v; betInput.value = v;
+}
+
+function startGame(){
+  clampBet();
+  if(bet < 1 || balance < 1){ toast('Add funds to play','danger'); return; }
+  balance -= bet; updateBalance();
+  pos = -1; phase='crossing'; busy=false;
+  setMult(1.0);
+  readout.classList.remove('win','dead');
+  roLbl.textContent = 'Current multiplier';
+
+  chook.className = 'chook';
+  betUI.classList.add('hide');
+  endUI.classList.add('hide');
+  crossUI.classList.remove('hide');
+
+  buildWorld();
+  placeChicken(false);
+  startTraffic();
+  paintLanes();
+  refreshHUD();
+  toast('Cross the lanes — cash out before you get hit', 'good');
+}
+
+/* ===================== FLOW: STEP ============================ */
+function step(){
+  if(phase!=='crossing' || busy) return;
+  const target = pos + 1;
+  if(target >= N) return;
+  busy = true; cashBtn.disabled = true; stepBtn.disabled = true;
+
+  // hop animation
+  chook.classList.remove('hopping'); void chook.offsetWidth; chook.classList.add('hopping');
+  pos = target;
+  placeChicken(true);
+  paintLanes();
+
+  const safe = Math.random() < SAFE[target];
+
+  // resolve mid-hop (when chicken is over the lane)
+  setTimeout(()=>{
+    if(safe){
+      setMult(MULT[target], {pop:true});
+      refreshHUD();
+      // little success spark
+      coinSpark(2);
+      if(target === N-1){
+        // crossed all 7 -> auto cash at 18x
+        setTimeout(()=>cashOut(true), 380);
+        return;
+      }
+      busy=false; stepBtn.disabled=false; cashBtn.disabled=false;
+      paintLanes();
+    } else {
+      death(target);
+    }
+  }, 250);
+}
+
+/* ===================== DEATH ================================= */
+function death(laneIdx){
+  phase='ended';
+  stepBtn.disabled = true; cashBtn.disabled = true;
+
+  // find or force a car in this lane near the chicken, slam it in
+  const host = document.getElementById('carlane-'+laneIdx);
+  const slamY = STAGE_H*0.5;
+  let car = host ? [...host.querySelectorAll('.car')].sort((a,b)=>Math.abs((a._y||0)-slamY)-Math.abs((b._y||0)-slamY))[0] : null;
+  if(!car){ spawnCar(laneIdx); car = host.querySelector('.car'); }
+
+  // drive that car hard onto the chicken
+  if(car){
+    cancelAnimationFrame(car._anim);
+    const fromY = car._y!=null ? car._y : -120;
+    const t0 = performance.now(), dur=230;
+    const an = (now)=>{
+      const t = Math.min(1,(now-t0)/dur);
+      const y = fromY + (slamY+6 - fromY)*t;
+      car.style.transform = `translateX(-50%) translateY(${y}px)`;
+      if(t<1) requestAnimationFrame(an);
+      else impact(laneIdx, car);
+    };
+    requestAnimationFrame(an);
+  } else {
+    impact(laneIdx, null);
+  }
+}
+
+function impact(laneIdx, car){
+  // squash chicken
+  chook.classList.remove('hopping');
+  chook.classList.add('squashed');
+  // screen shake
+  stage.classList.remove('shaking'); void stage.offsetWidth; stage.classList.add('shaking');
+  // red flash centered on chicken
+  const tx = updateCamera();
+  const fxX = laneCenterX(laneIdx) + tx;
+  impactFlash.style.setProperty('--fx', fxX+'px');
+  impactFlash.classList.remove('go'); void impactFlash.offsetWidth; impactFlash.classList.add('go');
+  // feather + dust burst
+  featherBurst(fxX, STAGE_H*0.5, 16);
+  // continue the car off-screen after the hit
+  if(car){
+    setTimeout(()=>{
+      const fromY = STAGE_H*0.5+6, t0=performance.now(), dur=420;
+      const an=(now)=>{const t=Math.min(1,(now-t0)/dur);
+        car.style.transform=`translateX(-50%) translateY(${fromY+(STAGE_H+140-fromY)*t}px)`;
+        if(t<1)requestAnimationFrame(an); else car.remove();};
+      requestAnimationFrame(an);
+    },180);
+  }
+
+  // HUD -> dead
+  readout.classList.add('dead');
+  roLbl.textContent = 'Busted';
+  floatText('SMASHED!', 'dead');
+
+  stopTraffic();
+  setTimeout(()=>{
+    addHistory(MULT[laneIdx], false);
+    endRound(false, 0);
+    toast(`Hit in lane ${laneIdx+1}. Lost ${fmt(bet)}.`, 'danger');
+  }, 760);
+}
+
+/* ===================== CASH OUT ============================== */
+function cashOut(auto=false){
+  if(phase!=='crossing' && !auto) return;
+  if(pos < 0) return;
+  phase='ended';
+  busy=true; stepBtn.disabled=true; cashBtn.disabled=true;
+  stopTraffic();
+
+  const payout = bet * curMult;
+  // celebrate
+  chook.classList.remove('hopping','squashed');
+  chook.classList.add('cheer');
+  readout.classList.add('win');
+  roLbl.textContent = auto && pos===N-1 ? 'Full crossing! Max payout' : 'Cashed out';
+
+  const tx = updateCamera();
+  const fxX = (pos<0?sidewalkX():laneCenterX(pos)) + tx;
+  coinBurst(fxX, STAGE_H*0.5, 26);
+  floatText('+'+fmt(payout-bet), 'win');
+
+  // count-up balance
+  countUpBalance(payout);
+  addHistory(curMult, true);
+
+  setTimeout(()=>{
+    endRound(true, payout);
+    toast(`Cashed out ${fmt(payout)} at ${curMult.toFixed(2)}×`, 'good');
+  }, 900);
+}
+
+/* ===================== END ROUND ============================= */
+function endRound(won, payout){
+  phase='ended';
+  crossUI.classList.add('hide');
+  endUI.classList.remove('hide');
+  paintLanes();
+  document.querySelectorAll('.lane.next').forEach(l=>l.classList.remove('next','armed'));
+}
+
+function playAgain(){
+  phase='betting'; pos=-1; busy=false;
+  chook.className='chook';
+  readout.classList.remove('win','dead','hot');
+  roLbl.textContent='Current multiplier';
+  setMult(1.0);
+  endUI.classList.add('hide');
+  crossUI.classList.add('hide');
+  betUI.classList.remove('hide');
+  stepBtn.disabled=false; cashBtn.disabled=true;
+  buildWorld();
+  placeChicken(false);
+  paintLanes();
+  refreshHUD();
+  clampBet();
+}
+
+/* ===================== BALANCE / HISTORY ===================== */
+function updateBalance(){ balanceEl.textContent = fmt(balance); }
+function countUpBalance(payout){
+  const start = balance, end = balance + payout, t0=performance.now(), dur=850;
+  const an=(now)=>{
+    const t=Math.min(1,(now-t0)/dur);
+    const e=1-Math.pow(1-t,3);
+    balanceEl.textContent = fmt(start + (end-start)*e);
+    if(t<1) requestAnimationFrame(an);
+    else { balance=end; updateBalance(); }
+  };
+  requestAnimationFrame(an);
+}
+function addHistory(mult, won){
+  history.unshift({mult, won});
+  if(history.length>8) history.pop();
+  historyEl.innerHTML = history.map(h=>
+    `<span class="hpill ${h.won?'win':'loss'}">${h.mult.toFixed(2).replace(/0$/,'')}×</span>`
+  ).join('');
+}
+
+/* ===================== FX HELPERS =========================== */
+function featherBurst(x,y,count){
+  for(let i=0;i<count;i++){
+    const f=document.createElement('div');
+    f.className = Math.random()<0.35 ? 'dust' : 'feather';
+    f.style.left=x+'px'; f.style.top=y+'px';
+    fxLayer.appendChild(f);
+    const ang=Math.random()*Math.PI*2, dist=40+Math.random()*90;
+    const dx=Math.cos(ang)*dist, dy=Math.sin(ang)*dist - 30;
+    const rot=(Math.random()*720-360);
+    f.animate([
+      {transform:'translate(-50%,-50%) rotate(0) scale(1)', opacity:1},
+      {transform:`translate(${dx-20}px,${dy-10}px) rotate(${rot}deg) scale(.9)`, opacity:1, offset:.6},
+      {transform:`translate(${dx}px,${dy+70}px) rotate(${rot*1.4}deg) scale(.5)`, opacity:0}
+    ],{duration:700+Math.random()*500, easing:'cubic-bezier(.2,.6,.3,1)'}).onfinish=()=>f.remove();
+  }
+}
+function coinBurst(x,y,count){
+  for(let i=0;i<count;i++){
+    const c=document.createElement('div');
+    c.className='coin-fx'; c.style.left=x+'px'; c.style.top=y+'px';
+    fxLayer.appendChild(c);
+    const ang=-Math.PI/2 + (Math.random()-0.5)*Math.PI*1.1;
+    const dist=60+Math.random()*120;
+    const dx=Math.cos(ang)*dist, peak=-(50+Math.random()*120);
+    setTimeout(()=>{
+      c.animate([
+        {transform:'translate(-50%,-50%) scale(.4)', opacity:0},
+        {transform:`translate(${dx*.5}px,${peak}px) scale(1.1)`, opacity:1, offset:.45},
+        {transform:`translate(${dx}px,${120}px) scale(.8)`, opacity:0}
+      ],{duration:900+Math.random()*300, easing:'cubic-bezier(.2,.7,.3,1)'}).onfinish=()=>c.remove();
+    }, i*18);
+  }
+}
+function coinSpark(n){
+  const tx=updateCamera();
+  const x=laneCenterX(pos)+tx, y=STAGE_H*0.5-10;
+  for(let i=0;i<n;i++){
+    const c=document.createElement('div'); c.className='coin-fx';
+    c.style.left=x+'px'; c.style.top=y+'px'; c.style.width='13px'; c.style.height='13px';
+    fxLayer.appendChild(c);
+    const dx=(Math.random()-0.5)*50;
+    c.animate([
+      {transform:'translate(-50%,-50%) scale(.4)', opacity:.9},
+      {transform:`translate(${dx}px,-40px) scale(1)`, opacity:0}
+    ],{duration:560, easing:'ease-out'}).onfinish=()=>c.remove();
+  }
+}
+function floatText(txt, cls){
+  const el=document.createElement('div');
+  el.className='floattext '+cls; el.textContent=txt;
+  stage.appendChild(el);
+  el.animate([
+    {transform:'translateX(-50%) translateY(10px) scale(.6)', opacity:0},
+    {transform:'translateX(-50%) translateY(-14px) scale(1.1)', opacity:1, offset:.4},
+    {transform:'translateX(-50%) translateY(-46px) scale(1)', opacity:0}
+  ],{duration:1100, easing:'cubic-bezier(.2,.7,.3,1)'}).onfinish=()=>el.remove();
+}
+let toastTimer;
+function toast(msg, kind=''){
+  toastEl.textContent=msg;
+  toastEl.className='toast show '+kind;
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>toastEl.classList.remove('show'), 2600);
+}
+
+/* ===================== EVENTS =============================== */
+startBtn.addEventListener('click', startGame);
+stepBtn.addEventListener('click', step);
+cashBtn.addEventListener('click', ()=>cashOut(false));
+againBtn.addEventListener('click', playAgain);
+
+document.querySelectorAll('.chip-btn').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    if(phase!=='betting') return;
+    if(b.dataset.bet){ bet = parseInt(b.dataset.bet,10); }
+    else if(b.dataset.op==='half'){ bet = Math.max(1, Math.floor(bet/2)); }
+    else if(b.dataset.op==='max'){ bet = balance; }
+    betInput.value = bet; clampBet();
+  });
+});
+betInput.addEventListener('input', ()=>{ if(phase==='betting') clampBet(); });
+betInput.addEventListener('blur', clampBet);
+
+window.addEventListener('resize', ()=>{ placeChicken(false); });
+
+/* ===================== INIT ================================ */
+buildWorld();
+updateBalance();
+placeChicken(false);
+paintLanes();
+refreshHUD();
+setMult(1.0);
+</script>
+</body>
+</html>

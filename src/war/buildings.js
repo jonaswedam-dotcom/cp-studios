@@ -36,7 +36,8 @@ function totalLevel(buildings, type) {
   return buildings.filter((b) => b.type === type).reduce((s, b) => s + b.level, 0)
 }
 export function costMultiplier(playerBuildings) {
-  return Math.max(0.4, 1 - 0.1 * totalLevel(playerBuildings, 'factory'))
+  // Floor at 0.5 so War Factories can discount troops by at most 50% — never free.
+  return Math.max(0.5, 1 - 0.1 * totalLevel(playerBuildings, 'factory'))
 }
 export function strengthMultiplier(playerBuildings) {
   return 1 + 0.1 * totalLevel(playerBuildings, 'lab')
