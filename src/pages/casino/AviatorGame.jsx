@@ -131,10 +131,18 @@ export default function AviatorGame() {
     }
 
     const row = data[0]
-    roundIdRef.current  = row.round_id
-    crashPointRef.current = null  // unknown until round ends
+    roundIdRef.current    = row.round_id
+    crashPointRef.current = null
     multiplierRef.current = 1.0
-    startTimeRef.current  = performance.now()
+
+    // Sync the client flight clock to the server.
+    // started_at is set by the server when the RPC executes; by the time this
+    // response arrives the server is already some milliseconds into the round.
+    // Without this offset the client always lags behind, so the plane looks like
+    // it's still flying after the server-side crash point has already been passed.
+    const nowMs           = Date.now()
+    const alreadyElapsedMs = Math.max(0, nowMs - new Date(row.started_at).getTime())
+    startTimeRef.current  = performance.now() - alreadyElapsedMs
 
     setMultiplier(1.0)
     setCashedOutAt(null)
@@ -146,10 +154,16 @@ export default function AviatorGame() {
     // Sync balance immediately from server response
     if (row.new_balance != null) loadBalance()
 
-    // Safety net: auto-cashout once the maximum flight time has elapsed.
-    // The server will return 'crashed' and reveal the crash point.
+    // Schedule the crash animation to fire at the exact server crash time.
+    // crash_at is returned by the server (migration 057); without it we fall back
+    // to AUTO_SETTLE_MS so the game still works if the migration hasn't run yet.
     clearTimeout(autoSettleRef.current)
-    autoSettleRef.current = setTimeout(() => handleCashOut(), AUTO_SETTLE_MS)
+    const msUntilCrash = row.crash_at
+      ? Math.max(0, new Date(row.crash_at).getTime() - nowMs)
+      : AUTO_SETTLE_MS
+    // +150 ms: gives the cashout request time to reach the server after the crash
+    // time passes, so the server's elapsed-time check definitely returns 'crashed'.
+    autoSettleRef.current = setTimeout(() => handleCashOut(), Math.min(msUntilCrash + 150, AUTO_SETTLE_MS))
 
     setPhase('flying')
   }
