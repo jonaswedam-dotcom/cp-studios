@@ -147,12 +147,33 @@ export default function AdminPage() {
 
   const fetchApproved = useCallback(async () => {
     setUsersLoading(true)
-    const { data } = await supabase
+    const { data: users } = await supabase
       .from('pending_users')
       .select('*')
       .eq('status', 'approved')
       .order('created_at', { ascending: false })
-    setApprovedUsers(data || [])
+
+    if (!users?.length) {
+      setApprovedUsers([])
+      setUsersLoading(false)
+      return
+    }
+
+    // Pull the current display_name from wallets (source of truth for usernames
+    // after rename — pending_users.username is only the name at signup time).
+    const userIds = users.map(u => u.user_id).filter(Boolean)
+    const { data: wallets } = await supabase
+      .from('wallets')
+      .select('user_id, display_name')
+      .in('user_id', userIds)
+
+    const nameByUserId = Object.fromEntries(
+      (wallets || []).map(w => [w.user_id, w.display_name])
+    )
+
+    setApprovedUsers(
+      users.map(u => ({ ...u, currentUsername: nameByUserId[u.user_id] || u.username }))
+    )
     setUsersLoading(false)
   }, [])
 
@@ -348,14 +369,14 @@ export default function AdminPage() {
                       {/* Avatar initial */}
                       <div className="w-9 h-9 rounded-full bg-cp-elevated border border-cp-border flex items-center justify-center flex-shrink-0">
                         <span className="font-display text-cp-muted text-sm">
-                          {(user.username || user.email || '?')[0].toUpperCase()}
+                          {(user.currentUsername || user.email || '?')[0].toUpperCase()}
                         </span>
                       </div>
 
                       {/* Name + email */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <p className="text-cp-text text-sm font-medium truncate">{user.username || '—'}</p>
+                          <p className="text-cp-text text-sm font-medium truncate">{user.currentUsername || '—'}</p>
                           {isOwnAccount && (
                             <span className="text-[10px] font-semibold text-cp-muted/60 bg-cp-elevated border border-cp-border px-1.5 py-0.5 rounded-md flex-shrink-0">
                               You
