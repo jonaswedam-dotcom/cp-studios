@@ -139,6 +139,15 @@ function AppRoutes() {
   )
 }
 
+// Gates the chat bubble so blocked accounts (CHAT_BLOCKED_EMAILS) never render it.
+// A wrapper rather than an early return inside ChatBubble — ChatBubble has many
+// hooks and can't conditionally bail before them without breaking the Rules of Hooks.
+function ChatBubbleGate() {
+  const { currentUser } = useApp()
+  if (currentUser?.isChatBlocked) return null
+  return <ChatBubble />
+}
+
 export default function App() {
   return (
     <AppProvider>
@@ -146,7 +155,7 @@ export default function App() {
         <div className="min-h-screen bg-cp-bg">
           <AppRoutes />
           {/* Floating chat bubble — always mounted so state persists across navigation */}
-          <ChatBubble />
+          <ChatBubbleGate />
         </div>
       </CasinoProvider>
     </AppProvider>

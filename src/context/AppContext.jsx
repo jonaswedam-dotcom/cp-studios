@@ -6,6 +6,10 @@ export const useApp = () => useContext(AppContext)
 
 const ADMIN_EMAILS = ['jonas.wedam@gmail.com', 'admin@cpstudios.app']
 
+// Accounts that can't see the chat (UI-only — hides the bubble, group + DMs).
+// Edit + redeploy to block/unblock someone.
+const CHAT_BLOCKED_EMAILS = ['gilbert.wedam@gmail.com']
+
 // Normalise a DB profile row → shape the rest of the app expects
 export function normalizeProfile(row) {
   return {
@@ -98,6 +102,7 @@ export function AppProvider({ children }) {
         avatar: session.user.user_metadata?.avatar_url
                   || `https://i.pravatar.cc/150?img=3`,
         isAdmin: ADMIN_EMAILS.includes(session.user.email),
+        isChatBlocked: CHAT_BLOCKED_EMAILS.includes(session.user.email),
       }
     : null
 
