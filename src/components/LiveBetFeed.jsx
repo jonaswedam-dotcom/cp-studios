@@ -49,7 +49,7 @@ function resultParts(bet) {
 }
 
 export default function LiveBetFeed() {
-  const { session, currentUser } = useApp()
+  const { session } = useApp()
   const userId = session?.user?.id ?? null
 
   const [current, setCurrent] = useState(null) // the single latest bet, or null
@@ -92,6 +92,12 @@ export default function LiveBetFeed() {
         { event: 'INSERT', schema: 'public', table: 'game_history' },
         ({ new: row }) => {
           if (!row) return
+          // Skip your own bets: the game_history row is written when the bet is
+          // placed (server decides the outcome up front), but each game reveals it
+          // only after a multi-second animation. Showing the self pill on insert
+          // would spoil your own result before the wheel/reels land. Other players'
+          // bets are fine — you're not watching their animation.
+          if (row.user_id === userId) return
           if (row.result === 'push') return // pushes (ties) don't refresh the pill — wins & losses only
           const key = row.id ?? `${row.user_id}:${row.created_at ?? ''}`
           if (lastKeyRef.current === key) return // ignore duplicate delivery
@@ -103,7 +109,6 @@ export default function LiveBetFeed() {
           setCurrent({
             key,
             user_id: row.user_id,
-            isSelf:  row.user_id === userId,
             game:    row.game,
             bet:     row.bet,
             result:  row.result,
@@ -125,7 +130,7 @@ export default function LiveBetFeed() {
 
   const { emoji, label } = metaFor(current.game)
   const { tone, verb, amount } = resultParts(current)
-  const name = current.isSelf ? (currentUser?.name || 'You') : (names[current.user_id] || 'Player')
+  const name = names[current.user_id] || 'Player'
 
   return (
     <div className="fixed top-[68px] inset-x-0 z-40 flex justify-center px-3 pointer-events-none">
@@ -138,7 +143,7 @@ export default function LiveBetFeed() {
       >
         <span className="text-base leading-none">{emoji}</span>
         <span className="text-xs sm:text-[13px] text-cp-text whitespace-nowrap truncate">
-          <span className={`font-semibold ${current.isSelf ? 'text-amber-400' : 'text-cp-text'}`}>
+          <span className="font-semibold text-cp-text">
             {name}
           </span>{' '}
           <span className={`font-bold ${tone}`}>{verb} {amount}</span>{' '}
